@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Receipt Scanner</string>
+    <string name="home_title">Receipt Scanner</string>
+    <string name="home_subtitle">Choose what you want to do from the main menu.</string>
+    <string name="button_new_receipt">New Receipt</string>
+    <string name="button_contents">Contacts</string>
+    <string name="button_history">History</string>
+    <string name="contacts_screen_title">Contancts</string>
+    <string name="back">Back</string>
+    <string name="add">Add</string>
+    <string name="contact_information_title">Contact Information</string>
+    <string name="contact_name_hint">Contact name</string>
+    <string name="contact_name_required">Enter a contact name</string>
+    <string name="contact_phone_hint">Phone number</string>
+    <string name="contact_phone_required">Enter a phone number</string>
+    <string name="add_new_contact">Add New Contact</string>
+    <string name="remove">Remove</string>
+    <string name="no_contacts">no contacts</string>
+</resources>
