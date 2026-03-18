@@ -9,7 +9,7 @@
     <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
+        android:layout_marginBottom="8dp"
         android:minHeight="48dp">
 
         <com.google.android.material.button.MaterialButton
@@ -29,7 +29,25 @@
             android:text="@string/new_receipt_screen_title"
             android:textAppearance="?attr/textAppearanceHeadlineSmall"
             android:textStyle="bold" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/button_add_participant"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:text="@string/add" />
     </RelativeLayout>
+
+    <LinearLayout
+        android:id="@+id/layout_participant_buttons"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:gravity="center_horizontal"
+        android:orientation="horizontal"
+        android:visibility="gone" />
 
     <FrameLayout
         android:layout_width="match_parent"

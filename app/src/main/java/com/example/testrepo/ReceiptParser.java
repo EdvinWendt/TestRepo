@@ -4,8 +4,10 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -330,6 +332,7 @@ final class ReceiptParser {
     static final class ReceiptItem {
         private final String name;
         private int amountCents;
+        private final Set<String> selectedParticipantKeys = new HashSet<>();
 
         ReceiptItem(String name, int amountCents) {
             this.name = name;
@@ -352,6 +355,26 @@ final class ReceiptParser {
 
         void setAmountCents(int amountCents) {
             this.amountCents = amountCents;
+        }
+
+        boolean isParticipantSelected(String participantKey) {
+            return selectedParticipantKeys.contains(participantKey);
+        }
+
+        void selectParticipant(String participantKey) {
+            selectedParticipantKeys.add(participantKey);
+        }
+
+        void deselectParticipant(String participantKey) {
+            selectedParticipantKeys.remove(participantKey);
+        }
+
+        void toggleParticipantSelection(String participantKey) {
+            if (selectedParticipantKeys.contains(participantKey)) {
+                selectedParticipantKeys.remove(participantKey);
+            } else {
+                selectedParticipantKeys.add(participantKey);
+            }
         }
     }
 }

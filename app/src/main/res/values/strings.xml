@@ -32,6 +32,15 @@
     <string name="contact_phone_hint">Phone number</string>
     <string name="contact_phone_required">Enter a phone number</string>
     <string name="add_new_contact">Add New Contact</string>
+    <string name="add_new_participant_title">Add New Participant</string>
+    <string name="phone_contacts_title">Phone Contacts</string>
+    <string name="loading_phone_contacts">Loading phone contacts...</string>
+    <string name="phone_contacts_permission_required">Allow contacts permission to load phone contacts.</string>
+    <string name="no_phone_contacts">No phone contacts found.</string>
+    <string name="participant_added">Participant added.</string>
+    <string name="participant_already_added">Participant already added.</string>
+    <string name="participant_total_label">Total to pay</string>
+    <string name="participant_phone_unavailable">Phone number unavailable</string>
     <string name="remove">Remove</string>
     <string name="no_contacts">no contacts</string>
 </resources>
