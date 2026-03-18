@@ -12,6 +12,9 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        findViewById(R.id.button_new_receipt).setOnClickListener(
+                view -> startActivity(new Intent(this, NewReceiptActivity.class))
+        );
         findViewById(R.id.button_contents).setOnClickListener(
                 view -> startActivity(new Intent(this, ContactsActivity.class))
         );
