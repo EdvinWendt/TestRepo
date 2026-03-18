@@ -84,6 +84,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     private LinearLayout participantButtonsLayout;
     private ListView receiptItemsList;
     private TextView receiptTotalValueView;
+    private MaterialButton nextButton;
     private ImageCapture imageCapture;
     private ProcessCameraProvider cameraProvider;
     private TextRecognizer textRecognizer;
@@ -129,6 +130,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         participantButtonsLayout = findViewById(R.id.layout_participant_buttons);
         receiptItemsList = findViewById(R.id.list_receipt_items);
         receiptTotalValueView = findViewById(R.id.text_receipt_total_value);
+        nextButton = findViewById(R.id.button_next);
         MaterialButton backButton = findViewById(R.id.button_back);
         MaterialButton addParticipantButton = findViewById(R.id.button_add_participant);
         captureButton = findViewById(R.id.button_take_picture);
@@ -150,6 +152,7 @@ public class NewReceiptActivity extends AppCompatActivity {
 
         backButton.setOnClickListener(view -> finish());
         addParticipantButton.setOnClickListener(view -> openAddParticipantDialog());
+        nextButton.setOnClickListener(view -> showReceiptSummaryDialog());
         captureButton.setOnClickListener(view -> {
             if (hasCameraPermission()) {
                 takePicture();
@@ -1003,6 +1006,34 @@ public class NewReceiptActivity extends AppCompatActivity {
             dialog.dismiss();
         });
 
+        dialog.show();
+    }
+
+    private void showReceiptSummaryDialog() {
+        View dialogView = getLayoutInflater().inflate(R.layout.dialog_receipt_summary, null);
+        LinearLayout summaryRowsLayout = dialogView.findViewById(R.id.layout_receipt_summary_rows);
+        MaterialButton sendRequestsButton = dialogView.findViewById(R.id.button_send_requests);
+
+        for (Participant participant : participants) {
+            View rowView = getLayoutInflater().inflate(
+                    R.layout.item_receipt_summary_participant,
+                    summaryRowsLayout,
+                    false
+            );
+            TextView nameView = rowView.findViewById(R.id.text_summary_participant_name);
+            TextView amountView = rowView.findViewById(R.id.text_summary_participant_amount);
+
+            nameView.setText(participant.name);
+            amountView.setText(formatCurrency(computeParticipantShareTotal(participant)));
+            summaryRowsLayout.addView(rowView);
+        }
+
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.receipt_summary_title)
+                .setView(dialogView)
+                .create();
+
+        sendRequestsButton.setOnClickListener(view -> dialog.dismiss());
         dialog.show();
     }
 

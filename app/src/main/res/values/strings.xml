@@ -41,6 +41,9 @@
     <string name="participant_already_added">Participant already added.</string>
     <string name="participant_total_label">Total to pay</string>
     <string name="participant_phone_unavailable">Phone number unavailable</string>
+    <string name="next">Next</string>
+    <string name="receipt_summary_title">Receipt Summary</string>
+    <string name="send_requests">Send Requests</string>
     <string name="remove">Remove</string>
     <string name="no_contacts">no contacts</string>
 </resources>
