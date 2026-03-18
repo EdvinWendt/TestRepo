@@ -15,10 +15,15 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.TestRepo">
-        <activity android:name=".NewReceiptActivity" />
-        <activity android:name=".ContactsActivity" />
+        <activity
+            android:name=".NewReceiptActivity"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name=".ContactsActivity"
+            android:screenOrientation="portrait" />
         <activity
             android:name=".MainActivity"
+            android:screenOrientation="portrait"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -31,6 +31,7 @@
     <string name="contact_name_required">Enter a contact name</string>
     <string name="contact_phone_hint">Phone number</string>
     <string name="contact_phone_required">Enter a phone number</string>
+    <string name="contact_phone_invalid">Enter a valid phone number</string>
     <string name="add_new_contact">Add New Contact</string>
     <string name="add_new_participant_title">Add New Participant</string>
     <string name="phone_contacts_title">Phone Contacts</string>

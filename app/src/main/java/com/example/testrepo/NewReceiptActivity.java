@@ -18,7 +18,11 @@ import android.provider.ContactsContract;
 import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
+import android.util.Patterns;
+import android.util.TypedValue;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
@@ -82,6 +86,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     private MaterialButton cropReceiptButton;
     private View receiptResultsLayout;
     private LinearLayout participantButtonsLayout;
+    private MaterialButton addParticipantButton;
     private ListView receiptItemsList;
     private TextView receiptTotalValueView;
     private MaterialButton nextButton;
@@ -93,6 +98,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     private final ArrayList<ReceiptParser.ReceiptItem> receiptItems = new ArrayList<>();
     private final ArrayList<Participant> participants = new ArrayList<>();
     private ReceiptItemsAdapter receiptItemsAdapter;
+    private boolean participantControlsVisible;
     private boolean showAddParticipantDialogAfterContactsPermission;
 
     private final ActivityResultLauncher<String> requestCameraPermissionLauncher =
@@ -132,7 +138,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         receiptTotalValueView = findViewById(R.id.text_receipt_total_value);
         nextButton = findViewById(R.id.button_next);
         MaterialButton backButton = findViewById(R.id.button_back);
-        MaterialButton addParticipantButton = findViewById(R.id.button_add_participant);
+        addParticipantButton = findViewById(R.id.button_add_participant);
         captureButton = findViewById(R.id.button_take_picture);
 
         backgroundExecutor = Executors.newSingleThreadExecutor();
@@ -145,7 +151,9 @@ public class NewReceiptActivity extends AppCompatActivity {
         });
         ensureDefaultParticipant();
         refreshParticipantButtons();
+        setParticipantControlsVisible(false);
         updateReceiptTotal();
+        updateNextButtonState();
         textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         refreshDefaultParticipantPhoneNumber();
         requestPhoneNumberPermissionsIfNeeded();
@@ -257,6 +265,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         cameraStatusView.setVisibility(View.GONE);
         captureButton.setVisibility(View.VISIBLE);
         captureButton.setEnabled(true);
+        setParticipantControlsVisible(false);
     }
 
     private int getTargetRotation() {
@@ -339,6 +348,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         captureButton.setVisibility(View.GONE);
         cropReceiptLayout.setVisibility(View.GONE);
         receiptResultsLayout.setVisibility(View.GONE);
+        setParticipantControlsVisible(false);
         showStatusMessage(R.string.preparing_crop, false);
 
         backgroundExecutor.execute(() -> {
@@ -568,11 +578,13 @@ public class NewReceiptActivity extends AppCompatActivity {
         cropReceiptLayout.setVisibility(View.GONE);
         captureButton.setVisibility(View.GONE);
         receiptResultsLayout.setVisibility(View.VISIBLE);
+        setParticipantControlsVisible(true);
     }
 
     private void refreshReceiptItems() {
         receiptItemsAdapter.notifyDataSetChanged();
         updateReceiptTotal();
+        updateNextButtonState();
     }
 
     private void updateReceiptTotal() {
@@ -581,6 +593,26 @@ public class NewReceiptActivity extends AppCompatActivity {
             totalCents += item.getAmountCents();
         }
         receiptTotalValueView.setText(receiptParser.formatAmount(totalCents));
+    }
+
+    private void updateNextButtonState() {
+        if (nextButton == null) {
+            return;
+        }
+
+        if (receiptItems.isEmpty()) {
+            nextButton.setEnabled(false);
+            return;
+        }
+
+        for (ReceiptParser.ReceiptItem item : receiptItems) {
+            if (countSelectedParticipants(item) == 0) {
+                nextButton.setEnabled(false);
+                return;
+            }
+        }
+
+        nextButton.setEnabled(true);
     }
 
     private void showEditReceiptItemDialog(ReceiptParser.ReceiptItem item) {
@@ -650,6 +682,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         PhoneContactsAdapter phoneContactsAdapter = new PhoneContactsAdapter(phoneContacts);
         phoneContactsList.setAdapter(phoneContactsAdapter);
         phoneContactsList.setEmptyView(emptyContactsView);
+        addParticipantButton.setEnabled(false);
         phoneContactsList.setOnItemClickListener((parent, view, position, id) -> {
             PhoneContact selectedContact = phoneContactsAdapter.getItem(position);
             if (selectedContact == null) {
@@ -661,6 +694,36 @@ public class NewReceiptActivity extends AppCompatActivity {
             nameLayout.setError(null);
             phoneLayout.setError(null);
         });
+
+        TextWatcher validationWatcher = new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                updateAddParticipantButtonState(
+                        nameLayout,
+                        phoneLayout,
+                        nameInput,
+                        phoneInput,
+                        addParticipantButton
+                );
+            }
+        };
+        nameInput.addTextChangedListener(validationWatcher);
+        phoneInput.addTextChangedListener(validationWatcher);
+        updateAddParticipantButtonState(
+                nameLayout,
+                phoneLayout,
+                nameInput,
+                phoneInput,
+                addParticipantButton
+        );
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.add_new_participant_title)
@@ -681,6 +744,9 @@ public class NewReceiptActivity extends AppCompatActivity {
             }
             if (phoneNumber.isEmpty()) {
                 phoneLayout.setError(getString(R.string.contact_phone_required));
+                hasError = true;
+            } else if (!isValidPhoneNumber(phoneNumber)) {
+                phoneLayout.setError(getString(R.string.contact_phone_invalid));
                 hasError = true;
             }
             if (hasError) {
@@ -943,14 +1009,38 @@ public class NewReceiptActivity extends AppCompatActivity {
         return false;
     }
 
-    private void refreshParticipantButtons() {
-        participantButtonsLayout.removeAllViews();
-        if (participants.isEmpty()) {
-            participantButtonsLayout.setVisibility(View.GONE);
+    private void setParticipantControlsVisible(boolean visible) {
+        participantControlsVisible = visible;
+        if (addParticipantButton != null) {
+            addParticipantButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+        }
+        if (visible) {
+            refreshParticipantButtons();
+        } else {
+            updateParticipantButtonsVisibility();
+        }
+    }
+
+    private void updateParticipantButtonsVisibility() {
+        if (participantButtonsLayout == null) {
             return;
         }
 
-        participantButtonsLayout.setVisibility(View.VISIBLE);
+        if (!participantControlsVisible || participants.isEmpty()) {
+            participantButtonsLayout.setVisibility(View.GONE);
+        } else {
+            participantButtonsLayout.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void refreshParticipantButtons() {
+        participantButtonsLayout.removeAllViews();
+        if (!participantControlsVisible || participants.isEmpty()) {
+            updateParticipantButtonsVisibility();
+            return;
+        }
+
+        updateParticipantButtonsVisibility();
         int buttonSize = dpToPx(52);
         int buttonSpacing = dpToPx(6);
 
@@ -960,8 +1050,12 @@ public class NewReceiptActivity extends AppCompatActivity {
                     new LinearLayout.LayoutParams(buttonSize, buttonSize);
             layoutParams.setMargins(buttonSpacing, 0, buttonSpacing, 0);
             participantButton.setLayoutParams(layoutParams);
-            participantButton.setText(participant.initials);
-            participantButton.setAllCaps(true);
+            participantButton.setText(getParticipantBadgeLabel(participant));
+            participantButton.setAllCaps(false);
+            participantButton.setTextSize(
+                    TypedValue.COMPLEX_UNIT_SP,
+                    getParticipantBadgeTextSizeSp(participant, false)
+            );
             participantButton.setCheckable(false);
             participantButton.setClickable(true);
             participantButton.setInsetTop(0);
@@ -1001,10 +1095,14 @@ public class NewReceiptActivity extends AppCompatActivity {
                 .setView(dialogView)
                 .create();
 
-        removeParticipantButton.setOnClickListener(view -> {
-            removeParticipant(participant);
-            dialog.dismiss();
-        });
+        boolean canRemoveParticipant = !isDefaultParticipant(participant);
+        removeParticipantButton.setEnabled(canRemoveParticipant);
+        if (canRemoveParticipant) {
+            removeParticipantButton.setOnClickListener(view -> {
+                removeParticipant(participant);
+                dialog.dismiss();
+            });
+        }
 
         dialog.show();
     }
@@ -1103,8 +1201,12 @@ public class NewReceiptActivity extends AppCompatActivity {
                     new LinearLayout.LayoutParams(checkboxSize, checkboxSize);
             layoutParams.setMargins(checkboxSpacing, 0, 0, 0);
             selectionButton.setLayoutParams(layoutParams);
-            selectionButton.setText(participant.initials);
-            selectionButton.setAllCaps(true);
+            selectionButton.setText(getParticipantBadgeLabel(participant));
+            selectionButton.setAllCaps(false);
+            selectionButton.setTextSize(
+                    TypedValue.COMPLEX_UNIT_SP,
+                    getParticipantBadgeTextSizeSp(participant, true)
+            );
             selectionButton.setInsetTop(0);
             selectionButton.setInsetBottom(0);
             selectionButton.setMinWidth(0);
@@ -1129,6 +1231,7 @@ public class NewReceiptActivity extends AppCompatActivity {
                         participant,
                         item.isParticipantSelected(participant.key)
                 );
+                updateNextButtonState();
             });
             participantSelectionLayout.addView(selectionButton);
         }
@@ -1157,6 +1260,25 @@ public class NewReceiptActivity extends AppCompatActivity {
                         + (Color.blue(backgroundColor) * 0.114)
         ) / 255d;
         return brightness > 0.65d ? Color.BLACK : Color.WHITE;
+    }
+
+    private boolean isDefaultParticipant(Participant participant) {
+        return DEFAULT_PARTICIPANT_KEY.equals(participant.key);
+    }
+
+    private String getParticipantBadgeLabel(Participant participant) {
+        if (isDefaultParticipant(participant)) {
+            return DEFAULT_PARTICIPANT_NAME;
+        }
+        return participant.initials;
+    }
+
+    private float getParticipantBadgeTextSizeSp(Participant participant, boolean compact) {
+        String badgeLabel = getParticipantBadgeLabel(participant);
+        if (badgeLabel.length() > 2) {
+            return compact ? 9f : 11f;
+        }
+        return compact ? 11f : 13f;
     }
 
     private String getParticipantInitials(String name) {
@@ -1327,6 +1449,34 @@ public class NewReceiptActivity extends AppCompatActivity {
         return normalizeWhitespace(phoneNumber).replaceAll("[^+\\d]", "");
     }
 
+    private boolean isValidPhoneNumber(String phoneNumber) {
+        String trimmedPhoneNumber = normalizeWhitespace(phoneNumber);
+        String normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+        return !trimmedPhoneNumber.isEmpty()
+                && normalizedPhoneNumber.length() >= 6
+                && Patterns.PHONE.matcher(trimmedPhoneNumber).matches();
+    }
+
+    private void updateAddParticipantButtonState(
+            TextInputLayout nameLayout,
+            TextInputLayout phoneLayout,
+            TextInputEditText nameInput,
+            TextInputEditText phoneInput,
+            MaterialButton addParticipantButton
+    ) {
+        String name = getText(nameInput);
+        String phoneNumber = getText(phoneInput);
+        boolean phoneNumberValid = isValidPhoneNumber(phoneNumber);
+
+        addParticipantButton.setEnabled(!name.isEmpty() && phoneNumberValid);
+        nameLayout.setError(null);
+        if (phoneNumber.isEmpty() || phoneNumberValid) {
+            phoneLayout.setError(null);
+        } else {
+            phoneLayout.setError(getString(R.string.contact_phone_invalid));
+        }
+    }
+
     private static final class RowFragment {
         private final String text;
         @Nullable
@@ -1464,6 +1614,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         cameraStatusView.setText(R.string.camera_permission_required);
         cameraStatusView.setVisibility(View.VISIBLE);
         captureButton.setEnabled(true);
+        setParticipantControlsVisible(false);
     }
 
     private void showCameraUnavailable() {
@@ -1471,6 +1622,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         cropReceiptLayout.setVisibility(View.GONE);
         receiptResultsLayout.setVisibility(View.GONE);
         captureButton.setVisibility(View.VISIBLE);
+        setParticipantControlsVisible(false);
         showCameraStatus(R.string.camera_unavailable);
     }
 
