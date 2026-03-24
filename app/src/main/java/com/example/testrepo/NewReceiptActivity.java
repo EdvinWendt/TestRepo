@@ -1,6 +1,8 @@
 package com.example.testrepo;
 
 import android.Manifest;
+import android.content.ClipData;
+import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -9,12 +11,16 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Rect;
+import android.graphics.pdf.PdfRenderer;
 import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.ParcelFileDescriptor;
 import android.provider.ContactsContract;
+import android.provider.OpenableColumns;
+import android.telephony.SmsManager;
 import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
@@ -60,13 +66,18 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -74,9 +85,11 @@ import java.util.concurrent.Executors;
 
 public class NewReceiptActivity extends AppCompatActivity {
     private static final int MAX_CROP_BITMAP_DIMENSION = 2048;
+    private static final int MAX_IMPORTED_PDF_PAGE_DIMENSION = 2800;
     private static final int UNCHECKED_PARTICIPANT_COLOR = 0xFF8A8A8A;
     private static final String DEFAULT_PARTICIPANT_NAME = "You";
     private static final String DEFAULT_PARTICIPANT_KEY = "participant_you";
+    private static final String MIME_TYPE_PDF = "application/pdf";
 
     private PreviewView previewView;
     private TextView cameraStatusView;
@@ -99,6 +112,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     private final ArrayList<Participant> participants = new ArrayList<>();
     private ReceiptItemsAdapter receiptItemsAdapter;
     private boolean participantControlsVisible;
+    private boolean sendRequestsAfterSmsPermission;
     private boolean showAddParticipantDialogAfterContactsPermission;
 
     private final ActivityResultLauncher<String> requestCameraPermissionLauncher =
@@ -120,6 +134,20 @@ public class NewReceiptActivity extends AppCompatActivity {
     private final ActivityResultLauncher<String[]> requestPhoneNumberPermissionsLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
                 refreshDefaultParticipantPhoneNumber();
+            });
+    private final ActivityResultLauncher<String> requestSendSmsPermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
+                if (isGranted && sendRequestsAfterSmsPermission) {
+                    sendRequestsAfterSmsPermission = false;
+                    sendParticipantPaymentRequests();
+                } else if (!isGranted) {
+                    sendRequestsAfterSmsPermission = false;
+                    Toast.makeText(
+                            this,
+                            R.string.send_requests_permission_required,
+                            Toast.LENGTH_SHORT
+                    ).show();
+                }
             });
 
     @Override
@@ -170,6 +198,21 @@ public class NewReceiptActivity extends AppCompatActivity {
         });
         cropReceiptButton.setOnClickListener(view -> cropAndAnalyzeReceipt());
 
+        if (handleSharedReceiptIntent(getIntent())) {
+            return;
+        }
+
+        startCaptureFlow();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleSharedReceiptIntent(intent);
+    }
+
+    private void startCaptureFlow() {
         if (hasCameraPermission()) {
             startCamera();
         } else {
@@ -185,6 +228,11 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private boolean hasContactsPermission() {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasSendSmsPermission() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS)
                 == PackageManager.PERMISSION_GRANTED;
     }
 
@@ -218,6 +266,353 @@ public class NewReceiptActivity extends AppCompatActivity {
         } else {
             showAddParticipantDialogAfterContactsPermission = true;
             requestContactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS);
+        }
+    }
+
+    private boolean handleSharedReceiptIntent(@Nullable Intent intent) {
+        if (intent == null) {
+            return false;
+        }
+
+        String action = intent.getAction();
+        if (!Intent.ACTION_SEND.equals(action) && !Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+            return false;
+        }
+
+        importSharedReceipt(intent);
+        return true;
+    }
+
+    private void importSharedReceipt(@NonNull Intent intent) {
+        stopCameraPreview();
+        previewView.setVisibility(View.GONE);
+        captureButton.setVisibility(View.GONE);
+        cropReceiptLayout.setVisibility(View.GONE);
+        receiptResultsLayout.setVisibility(View.GONE);
+        setParticipantControlsVisible(false);
+        showStatusMessage(R.string.importing_shared_receipt, false);
+
+        backgroundExecutor.execute(() -> {
+            SharedReceiptImportData importData;
+            try {
+                importData = prepareSharedReceiptImport(intent);
+            } catch (IOException exception) {
+                runOnUiThread(() -> handleSharedReceiptImportFailure(
+                        R.string.shared_receipt_open_failed
+                ));
+                return;
+            }
+
+            if (importData.rows.isEmpty() && importData.imageUris.isEmpty()) {
+                cleanupTemporaryFiles(importData.temporaryFiles);
+                runOnUiThread(() -> handleSharedReceiptImportFailure(
+                        R.string.shared_receipt_empty
+                ));
+                return;
+            }
+
+            runOnUiThread(() -> processSharedReceiptImport(importData));
+        });
+    }
+
+    private void processSharedReceiptImport(@NonNull SharedReceiptImportData importData) {
+        if (importData.imageUris.isEmpty()) {
+            finishSharedReceiptImport(importData.rows, importData.temporaryFiles);
+            return;
+        }
+
+        processSharedReceiptImage(importData, 0);
+    }
+
+    private void processSharedReceiptImage(
+            @NonNull SharedReceiptImportData importData,
+            int index
+    ) {
+        if (index >= importData.imageUris.size()) {
+            finishSharedReceiptImport(importData.rows, importData.temporaryFiles);
+            return;
+        }
+
+        InputImage inputImage;
+        try {
+            inputImage = InputImage.fromFilePath(this, importData.imageUris.get(index));
+        } catch (IOException exception) {
+            cleanupTemporaryFiles(importData.temporaryFiles);
+            handleSharedReceiptImportFailure(R.string.shared_receipt_open_failed);
+            return;
+        }
+
+        textRecognizer.process(inputImage)
+                .addOnSuccessListener(recognizedText -> {
+                    importData.rows.addAll(extractRecognizedLines(recognizedText));
+                    processSharedReceiptImage(importData, index + 1);
+                })
+                .addOnFailureListener(exception -> {
+                    cleanupTemporaryFiles(importData.temporaryFiles);
+                    handleSharedReceiptImportFailure(R.string.shared_receipt_open_failed);
+                });
+    }
+
+    private void finishSharedReceiptImport(
+            @NonNull ArrayList<String> importedRows,
+            @NonNull ArrayList<File> temporaryFiles
+    ) {
+        cleanupTemporaryFiles(temporaryFiles);
+
+        ArrayList<ReceiptParser.ReceiptItem> detectedItems =
+                receiptParser.extractReceiptItems(importedRows);
+        if (receiptParser.isReceiptDetected(importedRows, detectedItems) && !detectedItems.isEmpty()) {
+            showReceiptResults(detectedItems);
+        } else {
+            handleSharedReceiptImportFailure(R.string.no_receipt_detected);
+        }
+    }
+
+    private void handleSharedReceiptImportFailure(int messageResId) {
+        cameraStatusView.setVisibility(View.GONE);
+        Toast.makeText(this, messageResId, Toast.LENGTH_SHORT).show();
+        showCameraFallbackAfterImport();
+    }
+
+    private void showCameraFallbackAfterImport() {
+        if (hasCameraPermission()) {
+            startCamera();
+        } else {
+            showPermissionRequired();
+        }
+    }
+
+    @NonNull
+    private SharedReceiptImportData prepareSharedReceiptImport(@NonNull Intent intent)
+            throws IOException {
+        SharedReceiptImportData importData = new SharedReceiptImportData();
+        try {
+            String sharedText = intent.getStringExtra(Intent.EXTRA_TEXT);
+            if (sharedText != null && !sharedText.trim().isEmpty()) {
+                importData.rows.addAll(splitSharedTextIntoRows(sharedText));
+            }
+
+            for (Uri sharedUri : collectSharedUris(intent)) {
+                importSharedUri(intent, sharedUri, importData);
+            }
+            return importData;
+        } catch (IOException exception) {
+            cleanupTemporaryFiles(importData.temporaryFiles);
+            throw exception;
+        }
+    }
+
+    @NonNull
+    private ArrayList<String> splitSharedTextIntoRows(@NonNull String sharedText) {
+        ArrayList<String> rows = new ArrayList<>();
+        String[] rawRows = sharedText.split("\\r?\\n");
+        for (String rawRow : rawRows) {
+            String normalizedRow = normalizeWhitespace(rawRow);
+            if (!normalizedRow.isEmpty()) {
+                rows.add(normalizedRow);
+            }
+        }
+        return rows;
+    }
+
+    @NonNull
+    private ArrayList<Uri> collectSharedUris(@NonNull Intent intent) {
+        LinkedHashSet<Uri> uriSet = new LinkedHashSet<>();
+
+        Uri sharedStream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+        if (sharedStream != null) {
+            uriSet.add(sharedStream);
+        }
+
+        ArrayList<Uri> sharedStreams = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+        if (sharedStreams != null) {
+            uriSet.addAll(sharedStreams);
+        }
+
+        ClipData clipData = intent.getClipData();
+        if (clipData != null) {
+            for (int index = 0; index < clipData.getItemCount(); index++) {
+                Uri clipUri = clipData.getItemAt(index).getUri();
+                if (clipUri != null) {
+                    uriSet.add(clipUri);
+                }
+            }
+        }
+
+        Uri dataUri = intent.getData();
+        if (dataUri != null) {
+            uriSet.add(dataUri);
+        }
+
+        return new ArrayList<>(uriSet);
+    }
+
+    private void importSharedUri(
+            @NonNull Intent intent,
+            @NonNull Uri sharedUri,
+            @NonNull SharedReceiptImportData importData
+    ) throws IOException {
+        String mimeType = resolveSharedMimeType(intent, sharedUri);
+        if (mimeType != null && mimeType.startsWith("text/")) {
+            importData.rows.addAll(readSharedTextRows(sharedUri));
+            return;
+        }
+
+        if (isPdfMimeType(mimeType) || isPdfUri(sharedUri)) {
+            ArrayList<File> renderedPages = renderPdfToImageFiles(sharedUri);
+            importData.temporaryFiles.addAll(renderedPages);
+            for (File renderedPage : renderedPages) {
+                importData.imageUris.add(Uri.fromFile(renderedPage));
+            }
+            return;
+        }
+
+        importData.imageUris.add(sharedUri);
+    }
+
+    @Nullable
+    private String resolveSharedMimeType(@NonNull Intent intent, @NonNull Uri sharedUri) {
+        String mimeType = getContentResolver().getType(sharedUri);
+        if (mimeType != null && !mimeType.isEmpty()) {
+            return mimeType;
+        }
+
+        String displayName = resolveSharedDisplayName(sharedUri);
+        if (!displayName.isEmpty()) {
+            String loweredDisplayName = displayName.toLowerCase(Locale.US);
+            if (loweredDisplayName.endsWith(".pdf")) {
+                return MIME_TYPE_PDF;
+            }
+            if (loweredDisplayName.endsWith(".txt")) {
+                return "text/plain";
+            }
+        }
+
+        String intentType = intent.getType();
+        return intentType == null || intentType.isEmpty() || "*/*".equals(intentType)
+                ? null
+                : intentType;
+    }
+
+    @NonNull
+    private String resolveSharedDisplayName(@NonNull Uri sharedUri) {
+        if ("content".equalsIgnoreCase(sharedUri.getScheme())) {
+            try (Cursor cursor = getContentResolver().query(
+                    sharedUri,
+                    new String[]{OpenableColumns.DISPLAY_NAME},
+                    null,
+                    null,
+                    null
+            )) {
+                if (cursor != null
+                        && cursor.moveToFirst()
+                        && !cursor.isNull(0)) {
+                    return cursor.getString(0);
+                }
+            }
+        }
+
+        String lastPathSegment = sharedUri.getLastPathSegment();
+        return lastPathSegment == null ? "" : lastPathSegment;
+    }
+
+    private boolean isPdfMimeType(@Nullable String mimeType) {
+        return MIME_TYPE_PDF.equalsIgnoreCase(mimeType);
+    }
+
+    private boolean isPdfUri(@NonNull Uri sharedUri) {
+        String displayName = resolveSharedDisplayName(sharedUri).toLowerCase(Locale.US);
+        return displayName.endsWith(".pdf");
+    }
+
+    @NonNull
+    private ArrayList<String> readSharedTextRows(@NonNull Uri sharedUri) throws IOException {
+        ArrayList<String> rows = new ArrayList<>();
+        try (InputStream inputStream = getContentResolver().openInputStream(sharedUri)) {
+            if (inputStream == null) {
+                throw new IOException("Unable to read shared text");
+            }
+
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(inputStream, StandardCharsets.UTF_8)
+            )) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String normalizedLine = normalizeWhitespace(line);
+                    if (!normalizedLine.isEmpty()) {
+                        rows.add(normalizedLine);
+                    }
+                }
+            }
+        }
+        return rows;
+    }
+
+    @NonNull
+    private ArrayList<File> renderPdfToImageFiles(@NonNull Uri pdfUri) throws IOException {
+        ArrayList<File> renderedFiles = new ArrayList<>();
+        ParcelFileDescriptor fileDescriptor = getContentResolver().openFileDescriptor(pdfUri, "r");
+        if (fileDescriptor == null) {
+            throw new IOException("Unable to open shared PDF");
+        }
+
+        try (ParcelFileDescriptor descriptor = fileDescriptor;
+             PdfRenderer renderer = new PdfRenderer(descriptor)) {
+            for (int pageIndex = 0; pageIndex < renderer.getPageCount(); pageIndex++) {
+                File outputFile = createImageFile("shared_receipt_" + pageIndex + "_");
+                try (PdfRenderer.Page page = renderer.openPage(pageIndex)) {
+                    Bitmap pageBitmap = renderPdfPage(page);
+                    try {
+                        saveBitmapAsJpeg(pageBitmap, outputFile);
+                    } finally {
+                        pageBitmap.recycle();
+                    }
+                }
+                renderedFiles.add(outputFile);
+            }
+        } catch (IOException | RuntimeException exception) {
+            cleanupTemporaryFiles(renderedFiles);
+            if (exception instanceof IOException) {
+                throw (IOException) exception;
+            }
+            throw new IOException("Unable to render shared PDF", exception);
+        }
+
+        return renderedFiles;
+    }
+
+    @NonNull
+    private Bitmap renderPdfPage(@NonNull PdfRenderer.Page page) {
+        float widthScale = (float) MAX_IMPORTED_PDF_PAGE_DIMENSION
+                / Math.max(page.getWidth(), 1);
+        float heightScale = (float) MAX_IMPORTED_PDF_PAGE_DIMENSION
+                / Math.max(page.getHeight(), 1);
+        float scale = Math.max(1f, Math.min(widthScale, heightScale));
+
+        int bitmapWidth = Math.max(1, Math.round(page.getWidth() * scale));
+        int bitmapHeight = Math.max(1, Math.round(page.getHeight() * scale));
+        Bitmap bitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888);
+        bitmap.eraseColor(Color.WHITE);
+
+        Matrix renderMatrix = new Matrix();
+        renderMatrix.setScale(
+                (float) bitmapWidth / Math.max(page.getWidth(), 1),
+                (float) bitmapHeight / Math.max(page.getHeight(), 1)
+        );
+        page.render(
+                bitmap,
+                null,
+                renderMatrix,
+                PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
+        );
+        return bitmap;
+    }
+
+    private void cleanupTemporaryFiles(@NonNull ArrayList<File> temporaryFiles) {
+        for (File temporaryFile : temporaryFiles) {
+            if (temporaryFile.exists()) {
+                temporaryFile.delete();
+            }
         }
     }
 
@@ -1131,8 +1526,77 @@ public class NewReceiptActivity extends AppCompatActivity {
                 .setView(dialogView)
                 .create();
 
-        sendRequestsButton.setOnClickListener(view -> dialog.dismiss());
+        sendRequestsButton.setOnClickListener(view -> {
+            dialog.dismiss();
+            openSendRequestsFlow();
+        });
         dialog.show();
+    }
+
+    private void openSendRequestsFlow() {
+        if (!hasSendSmsPermission()) {
+            sendRequestsAfterSmsPermission = true;
+            requestSendSmsPermissionLauncher.launch(Manifest.permission.SEND_SMS);
+            return;
+        }
+        sendParticipantPaymentRequests();
+    }
+
+    private void sendParticipantPaymentRequests() {
+        SmsManager smsManager = SmsManager.getDefault();
+        int sentCount = 0;
+        int skippedCount = 0;
+
+        for (Participant participant : participants) {
+            if (isDefaultParticipant(participant)) {
+                continue;
+            }
+
+            BigDecimal participantTotal = computeParticipantShareTotal(participant);
+            String phoneNumber = normalizeWhitespace(participant.phoneNumber);
+            if (participantTotal.compareTo(BigDecimal.ZERO) <= 0 || !isValidPhoneNumber(phoneNumber)) {
+                skippedCount++;
+                continue;
+            }
+
+            String message = getString(
+                    R.string.participant_payment_request_message,
+                    participant.name,
+                    formatCurrency(participantTotal)
+            );
+
+            try {
+                ArrayList<String> messageParts = smsManager.divideMessage(message);
+                if (messageParts.size() > 1) {
+                    smsManager.sendMultipartTextMessage(
+                            phoneNumber,
+                            null,
+                            messageParts,
+                            null,
+                            null
+                    );
+                } else {
+                    smsManager.sendTextMessage(phoneNumber, null, message, null, null);
+                }
+                sentCount++;
+            } catch (IllegalArgumentException | SecurityException exception) {
+                skippedCount++;
+            }
+        }
+
+        if (sentCount == 0) {
+            Toast.makeText(this, R.string.send_requests_none, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int messageResId = skippedCount == 0
+                ? R.string.send_requests_success
+                : R.string.send_requests_partial;
+        Toast.makeText(
+                this,
+                getString(messageResId, sentCount, skippedCount),
+                Toast.LENGTH_SHORT
+        ).show();
     }
 
     private BigDecimal computeParticipantShareTotal(Participant participant) {
@@ -1475,6 +1939,12 @@ public class NewReceiptActivity extends AppCompatActivity {
         } else {
             phoneLayout.setError(getString(R.string.contact_phone_invalid));
         }
+    }
+
+    private static final class SharedReceiptImportData {
+        private final ArrayList<String> rows = new ArrayList<>();
+        private final ArrayList<Uri> imageUris = new ArrayList<>();
+        private final ArrayList<File> temporaryFiles = new ArrayList<>();
     }
 
     private static final class RowFragment {

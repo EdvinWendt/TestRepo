@@ -11,11 +11,14 @@
     <string name="camera_unavailable">The camera could not be started on this device.</string>
     <string name="photo_save_failed">Unable to save the photo.</string>
     <string name="scanning_receipt">Scanning receipt...</string>
+    <string name="importing_shared_receipt">Importing shared receipt...</string>
     <string name="preparing_crop">Preparing crop...</string>
     <string name="scanning_cropped_receipt">Scanning cropped receipt...</string>
     <string name="crop_receipt_hint">Adjust the crop box so it only covers the receipt.</string>
     <string name="no_receipt_detected">No receipt detected.</string>
     <string name="captured_photo_unavailable">Unable to load the captured photo.</string>
+    <string name="shared_receipt_open_failed">Unable to open the shared receipt.</string>
+    <string name="shared_receipt_empty">No receipt data was shared.</string>
     <string name="receipt_items_title">Receipt Items</string>
     <string name="receipt_total_label">Total</string>
     <string name="edit_receipt_item_price_label">Price</string>
@@ -45,6 +48,11 @@
     <string name="next">Next</string>
     <string name="receipt_summary_title">Receipt Summary</string>
     <string name="send_requests">Send Requests</string>
+    <string name="participant_payment_request_message">Hi %1$s, your share of this receipt is %2$s SEK. Please send it to me via Swish.</string>
+    <string name="send_requests_success">Sent %1$d payment reminders.</string>
+    <string name="send_requests_partial">Sent %1$d payment reminders. Skipped %2$d participants.</string>
+    <string name="send_requests_none">No participant requests to send.</string>
+    <string name="send_requests_permission_required">SMS permission is required to send payment reminders.</string>
     <string name="remove">Remove</string>
     <string name="no_contacts">no contacts</string>
 </resources>

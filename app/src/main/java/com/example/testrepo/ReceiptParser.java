@@ -24,6 +24,23 @@ final class ReceiptParser {
             "^(.*?)(?:\\s+)(\\d+\\s*(?:st|st\\.|stk|x|pack|pkt)?\\s*[*x])\\s*\\d+(?:[\\.,]\\d{2})?\\s*(?:kr|sek)?$",
             Pattern.CASE_INSENSITIVE
     );
+    private static final Pattern TRAILING_ARTICLE_NUMBER_PATTERN = Pattern.compile(
+            "^(.*?)\\s+\\d{5,}$"
+    );
+    private static final Pattern TRAILING_UNIT_PRICE_PATTERN = Pattern.compile(
+            "^(.*?)\\s+[-+]?\\d+(?:[\\.,]\\d{2})?$"
+    );
+    private static final Pattern TRAILING_QUANTITY_PATTERN = Pattern.compile(
+            "^(.*?)\\s+\\d+(?:[\\.,]\\d+)?\\s*(?:st|st\\.|stk|x|pack|pkt|kg|hg|g|mg|l|cl|dl|ml)$",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern PROMOTION_MARKER_PATTERN = Pattern.compile(
+            "\\b\\d+\\s*f\\s*\\d+(?:[\\.,]\\d{2})?\\s*(?:kr|sek)?\\b",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern TRAILING_SHORT_MARKER_PATTERN = Pattern.compile(
+            "[,\\s]+\\p{L}{1,2}$"
+    );
     private static final Pattern LEADING_MARKERS_PATTERN = Pattern.compile("^[*+~#]+\\s*");
     private static final Pattern TRAILING_PUNCTUATION_PATTERN = Pattern.compile("[\\s:;,.]+$");
     private static final Pattern LETTER_PATTERN = Pattern.compile(".*\\p{L}.*");
@@ -31,7 +48,8 @@ final class ReceiptParser {
 
     private static final String[] RECEIPT_KEYWORDS = {
             "total", "subtotal", "tax", "vat", "moms", "summa", "receipt",
-            "cash", "card", "payment", "change", "att betala", "rabatt"
+            "cash", "card", "payment", "change", "att betala", "rabatt",
+            "kvitto", "beskrivning"
     };
     private static final String[] DISCOUNT_KEYWORDS = {
             "discount", "rabatt", "bonus", "kupong", "erbjud"
@@ -41,14 +59,16 @@ final class ReceiptParser {
             "change", "cash", "card", "visa", "mastercard", "payment", "balance",
             "discount", "rabatt", "saving", "savings", "receipt", "date", "time",
             "invoice", "amount", "terminal", "store", "bank", "tender", "kassa",
-            "kort", "orgnr", "bonus", "medlemspris"
+            "kort", "orgnr", "bonus", "medlemspris", "betalat", "betalningsinformation",
+            "netto", "brutto"
     };
 
     ArrayList<ReceiptItem> extractReceiptItems(List<String> rows) {
+        ArrayList<String> relevantRows = narrowToItemSection(rows);
         ArrayList<MutableReceiptItem> parsedItems = new ArrayList<>();
         String pendingDescription = null;
 
-        for (String rawRow : rows) {
+        for (String rawRow : relevantRows) {
             String normalizedRow = normalizeWhitespace(rawRow);
             if (normalizedRow.isEmpty()) {
                 continue;
@@ -73,7 +93,9 @@ final class ReceiptParser {
                 parsedItems.add(new MutableReceiptItem(parsedRow.name, parsedRow.amountCents));
                 pendingDescription = null;
             } else if (parsedRow.kind == RowKind.DISCOUNT && !parsedItems.isEmpty()) {
-                parsedItems.get(parsedItems.size() - 1).amountCents += parsedRow.amountCents;
+                MutableReceiptItem previousItem = parsedItems.get(parsedItems.size() - 1);
+                previousItem.amountCents += parsedRow.amountCents;
+                previousItem.appendNameFragment(parsedRow.name);
                 pendingDescription = null;
             } else {
                 pendingDescription = null;
@@ -150,8 +172,8 @@ final class ReceiptParser {
             return null;
         }
 
-        if (looksLikeDiscountRow(leftSide)) {
-            return new ParsedRow(RowKind.DISCOUNT, "", amountCents);
+        if (shouldTreatAsDiscountRow(leftSide, amountCents)) {
+            return new ParsedRow(RowKind.DISCOUNT, extractDiscountNameFragment(leftSide), amountCents);
         }
 
         String itemName = extractDisplayName(leftSide);
@@ -188,6 +210,11 @@ final class ReceiptParser {
 
     private String extractDisplayName(String leftSide) {
         String cleanedLeftSide = cleanText(leftSide);
+        String tabularDescription = stripTrailingTableColumns(cleanedLeftSide);
+        if (!tabularDescription.equals(cleanedLeftSide)) {
+            return tabularDescription;
+        }
+
         Matcher quantityMatcher = QUANTITY_WITH_UNIT_PRICE_PATTERN.matcher(cleanedLeftSide);
         if (!quantityMatcher.matches()) {
             return cleanedLeftSide;
@@ -201,6 +228,118 @@ final class ReceiptParser {
             return quantityMarker;
         }
         return baseName + " " + quantityMarker;
+    }
+
+    private ArrayList<String> narrowToItemSection(List<String> rows) {
+        int sectionStartIndex = -1;
+        for (int index = 0; index < rows.size(); index++) {
+            String normalizedRow = normalizeWhitespace(rows.get(index));
+            if (looksLikeItemSectionHeader(normalizedRow)) {
+                sectionStartIndex = index + 1;
+                break;
+            }
+        }
+
+        if (sectionStartIndex < 0) {
+            return new ArrayList<>(rows);
+        }
+
+        ArrayList<String> sectionRows = new ArrayList<>();
+        for (int index = sectionStartIndex; index < rows.size(); index++) {
+            String normalizedRow = normalizeWhitespace(rows.get(index));
+            if (normalizedRow.isEmpty()) {
+                continue;
+            }
+            if (looksLikeItemSectionFooter(normalizedRow)) {
+                break;
+            }
+            sectionRows.add(normalizedRow);
+        }
+        return sectionRows.isEmpty() ? new ArrayList<>(rows) : sectionRows;
+    }
+
+    private boolean looksLikeItemSectionHeader(String row) {
+        String lowered = row.toLowerCase(Locale.US);
+        return lowered.contains("beskrivning")
+                && (lowered.contains("summa")
+                || lowered.contains("artikelnummer")
+                || lowered.contains("pris"));
+    }
+
+    private boolean looksLikeItemSectionFooter(String row) {
+        String lowered = row.toLowerCase(Locale.US);
+        return lowered.contains("betalat")
+                || lowered.contains("betalningsinformation")
+                || lowered.contains("moms")
+                || lowered.contains("netto")
+                || lowered.contains("brutto")
+                || lowered.contains("avrundning")
+                || lowered.contains("kort");
+    }
+
+    private boolean shouldTreatAsDiscountRow(String leftSide, int amountCents) {
+        if (looksLikeDiscountRow(leftSide)) {
+            return true;
+        }
+        if (amountCents >= 0) {
+            return false;
+        }
+        if (containsPromotionMarker(leftSide)) {
+            return true;
+        }
+        return !looksLikeTabularItemRow(leftSide);
+    }
+
+    private boolean containsPromotionMarker(String value) {
+        return PROMOTION_MARKER_PATTERN.matcher(value).find();
+    }
+
+    private boolean looksLikeTabularItemRow(String leftSide) {
+        String stripped = stripTrailingTableColumns(cleanText(leftSide));
+        return !stripped.equals(cleanText(leftSide));
+    }
+
+    private String stripTrailingTableColumns(String value) {
+        String strippedQuantity = stripTrailingPattern(value, TRAILING_QUANTITY_PATTERN);
+        if (strippedQuantity == null) {
+            return value;
+        }
+
+        String strippedUnitPrice = stripTrailingPattern(strippedQuantity, TRAILING_UNIT_PRICE_PATTERN);
+        if (strippedUnitPrice == null) {
+            return value;
+        }
+
+        String strippedArticleNumber = stripTrailingPattern(
+                strippedUnitPrice,
+                TRAILING_ARTICLE_NUMBER_PATTERN
+        );
+        String candidateName = strippedArticleNumber == null
+                ? strippedUnitPrice
+                : strippedArticleNumber;
+        return cleanText(candidateName);
+    }
+
+    @Nullable
+    private String stripTrailingPattern(String value, Pattern pattern) {
+        Matcher matcher = pattern.matcher(value);
+        if (!matcher.matches()) {
+            return null;
+        }
+        return normalizeWhitespace(matcher.group(1));
+    }
+
+    private String extractDiscountNameFragment(String leftSide) {
+        String cleaned = cleanText(leftSide);
+        cleaned = PROMOTION_MARKER_PATTERN.matcher(cleaned).replaceAll("");
+        int commaIndex = cleaned.indexOf(',');
+        if (commaIndex >= 0) {
+            cleaned = cleaned.substring(0, commaIndex);
+        }
+        cleaned = TRAILING_SHORT_MARKER_PATTERN.matcher(cleaned).replaceFirst("");
+        cleaned = cleanText(cleaned).replaceAll("[-/]+$", "");
+        cleaned = cleanText(cleaned);
+        return looksLikeItemName(cleaned) ? cleaned : "";
     }
 
     private boolean looksLikeItemName(String itemName) {
@@ -320,12 +459,27 @@ final class ReceiptParser {
     }
 
     private static final class MutableReceiptItem {
-        private final String name;
+        private String name;
         private int amountCents;
 
         private MutableReceiptItem(String name, int amountCents) {
             this.name = name;
             this.amountCents = amountCents;
+        }
+
+        private void appendNameFragment(String fragment) {
+            String normalizedFragment = normalizeWhitespace(fragment);
+            if (normalizedFragment.isEmpty()) {
+                return;
+            }
+
+            String loweredName = name.toLowerCase(Locale.US);
+            String loweredFragment = normalizedFragment.toLowerCase(Locale.US);
+            if (loweredName.contains(loweredFragment)) {
+                return;
+            }
+
+            name = normalizeWhitespace(name + " " + normalizedFragment);
         }
     }
 

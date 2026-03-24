@@ -34,6 +34,17 @@ public class ReceiptParserTest {
     }
 
     @Test
+    public void parsesTabularRowsFromSharedPdfReceipts() {
+        ReceiptParser.ReceiptItem item = parser.parseReceiptItem(
+                "Avfallsp\u00e5se dragsn 2099950 20,90 2,00 st 41,80"
+        );
+
+        assertNotNull(item);
+        assertEquals("Avfallsp\u00e5se dragsn", item.getName());
+        assertEquals("41,80", item.getPrice());
+    }
+
+    @Test
     public void ignoresDiscountRowsEvenWhenTheyEndWithAPrice() {
         ReceiptParser.ReceiptItem item =
                 parser.parseReceiptItem("Rabatt: Havrefras, R 2f69kr -12,00");
@@ -117,5 +128,48 @@ public class ReceiptParserTest {
         assertTrue(parser.isReceiptDetected(rows, items));
         assertEquals("69,00", items.get(4).getPrice());
         assertEquals("40,00", items.get(5).getPrice());
+    }
+
+    @Test
+    public void parsesKivraTableSectionAndCombinesDiscountContinuationRows() {
+        ArrayList<String> rows = new ArrayList<>(Arrays.asList(
+                "ICA STORMARKNAD G\u00d6TEBORG",
+                "TEL : 031 - 746 61 00",
+                "Beskrivning Artikelnummer Pris M\u00e4ngd Summa(SEK)",
+                "Avfallsp\u00e5se dragsn 2099950 20,90 2,00 st 41,80",
+                "Basmatiris 1331022 39,95 1,00 st 39,95",
+                "Deo RO 48h Epic Fr 2130281 32,95 1,00 st 32,95",
+                "Eko Standmj 3% ESL 2095219 22,95 1,00 st 22,95",
+                "*Havrekuddar Kakao 2105691 40,50 2,00 st 81,00",
+                "Havrefras, R 2f69kr -12,00",
+                "*Mannafrutti Hallon 2118781 12,95 4,00 st 51,80",
+                "Ris-, mannam 4f40kr -11,80",
+                "N\u00f6tf\u00e4rs 12% 2117200 154,00 1,00 st 154,00",
+                "Olivolja Extra Vir 1327232 71,95 1,00 st 71,95",
+                "Paprika R\u00f6d 1217425 64,95 1,00 kg 40,66",
+                "Peppar R\u00f6d 1218001 129,00 1,00 kg 1,29",
+                "Proteinshake chokl 2348289 38,95 2,00 st 77,90",
+                "Salt Fint med jod 2127888 13,95 1,00 st 13,95",
+                "Svartpeppar Grovma 2023201 79,95 1,00 st 79,95",
+                "Teriyaki Sauce 1004151 43,95 1,00 st 43,95",
+                "Betalat 730,30",
+                "Moms % Moms Netto Brutto",
+                "Kort 730,30"
+        ));
+
+        ArrayList<ReceiptParser.ReceiptItem> items = parser.extractReceiptItems(rows);
+
+        assertEquals(14, items.size());
+        assertEquals("Avfallsp\u00e5se dragsn", items.get(0).getName());
+        assertEquals("41,80", items.get(0).getPrice());
+        assertEquals("Basmatiris", items.get(1).getName());
+        assertEquals("39,95", items.get(1).getPrice());
+        assertEquals("Havrekuddar Kakao Havrefras", items.get(4).getName());
+        assertEquals("69,00", items.get(4).getPrice());
+        assertEquals("Mannafrutti Hallon Ris", items.get(5).getName());
+        assertEquals("40,00", items.get(5).getPrice());
+        assertEquals("Teriyaki Sauce", items.get(13).getName());
+        assertEquals("43,95", items.get(13).getPrice());
+        assertTrue(parser.isReceiptDetected(rows, items));
     }
 }
