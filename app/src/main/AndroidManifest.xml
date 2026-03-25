@@ -17,6 +17,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.TestRepo">
         <activity
+            android:name=".HistoryActivity"
+            android:screenOrientation="portrait" />
+        <activity
             android:name=".NewReceiptActivity"
             android:exported="true"
             android:launchMode="singleTop"
@@ -41,9 +44,6 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
-        <activity
-            android:name=".ContactsActivity"
-            android:screenOrientation="portrait" />
         <activity
             android:name=".MainActivity"
             android:screenOrientation="portrait"

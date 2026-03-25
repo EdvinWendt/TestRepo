@@ -1,46 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:paddingStart="@dimen/dialog_horizontal_padding"
-    android:paddingTop="@dimen/dialog_vertical_padding"
-    android:paddingEnd="@dimen/dialog_horizontal_padding"
-    android:paddingBottom="@dimen/dialog_vertical_padding">
+    android:paddingTop="8dp">
 
     <com.google.android.material.textfield.TextInputLayout
-        android:id="@+id/layout_contact_name"
+        android:id="@+id/input_layout_receipt_item_name"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="12dp"
-        android:hint="@string/contact_name_hint">
+        android:hint="@string/receipt_item_name_hint">
 
         <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/input_contact_name"
+            android:id="@+id/edit_receipt_item_name"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:inputType="textCapWords" />
+            android:inputType="textCapWords"
+            android:maxLines="1" />
     </com.google.android.material.textfield.TextInputLayout>
 
     <com.google.android.material.textfield.TextInputLayout
-        android:id="@+id/layout_contact_phone"
+        android:id="@+id/input_layout_receipt_item_price"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="20dp"
-        android:hint="@string/contact_phone_hint">
+        android:hint="@string/edit_receipt_item_price_label">
 
         <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/input_contact_phone"
+            android:id="@+id/edit_receipt_item_price"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:inputType="phone" />
+            android:inputType="numberDecimal|numberSigned"
+            android:maxLines="1" />
     </com.google.android.material.textfield.TextInputLayout>
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/button_add_new_contact"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/add_new_contact" />
 
 </LinearLayout>

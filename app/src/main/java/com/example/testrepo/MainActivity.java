@@ -15,8 +15,8 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.button_new_receipt).setOnClickListener(
                 view -> startActivity(new Intent(this, NewReceiptActivity.class))
         );
-        findViewById(R.id.button_contents).setOnClickListener(
-                view -> startActivity(new Intent(this, ContactsActivity.class))
+        findViewById(R.id.button_history).setOnClickListener(
+                view -> startActivity(new Intent(this, HistoryActivity.class))
         );
     }
 }

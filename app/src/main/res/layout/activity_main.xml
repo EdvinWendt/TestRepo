@@ -32,15 +32,6 @@
         app:cornerRadius="16dp" />
 
     <com.google.android.material.button.MaterialButton
-        android:id="@+id/button_contents"
-        style="@style/Widget.Material3.Button.OutlinedButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:text="@string/button_contents"
-        app:cornerRadius="16dp" />
-
-    <com.google.android.material.button.MaterialButton
         android:id="@+id/button_history"
         style="@style/Widget.Material3.Button.OutlinedButton"
         android:layout_width="match_parent"

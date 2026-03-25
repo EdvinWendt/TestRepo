@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/action_add_participant"
+        android:icon="@drawable/ic_menu_add_participant"
+        android:title="@string/add_participant" />
+
+    <item
+        android:id="@+id/action_add_item"
+        android:icon="@drawable/ic_menu_add_item"
+        android:title="@string/add_item" />
+
+    <item
+        android:id="@+id/action_refresh_receipt"
+        android:icon="@drawable/ic_menu_refresh"
+        android:title="@string/refresh" />
+</menu>

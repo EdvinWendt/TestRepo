@@ -11,6 +11,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
 import android.graphics.pdf.PdfRenderer;
 import android.media.ExifInterface;
 import android.net.Uri;
@@ -44,12 +45,14 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.PopupMenu;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
+import androidx.core.graphics.drawable.DrawableCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.android.material.button.MaterialButton;
@@ -73,6 +76,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -99,7 +104,8 @@ public class NewReceiptActivity extends AppCompatActivity {
     private MaterialButton cropReceiptButton;
     private View receiptResultsLayout;
     private LinearLayout participantButtonsLayout;
-    private MaterialButton addParticipantButton;
+    private TextView receiptTitleView;
+    private View receiptActionsButton;
     private ListView receiptItemsList;
     private TextView receiptTotalValueView;
     private MaterialButton nextButton;
@@ -114,6 +120,10 @@ public class NewReceiptActivity extends AppCompatActivity {
     private boolean participantControlsVisible;
     private boolean sendRequestsAfterSmsPermission;
     private boolean showAddParticipantDialogAfterContactsPermission;
+    @Nullable
+    private Intent lastSharedReceiptIntent;
+    @Nullable
+    private File lastRefreshableReceiptImageFile;
 
     private final ActivityResultLauncher<String> requestCameraPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
@@ -162,11 +172,12 @@ public class NewReceiptActivity extends AppCompatActivity {
         cropReceiptButton = findViewById(R.id.button_crop_receipt);
         receiptResultsLayout = findViewById(R.id.layout_receipt_results);
         participantButtonsLayout = findViewById(R.id.layout_participant_buttons);
+        receiptTitleView = findViewById(R.id.text_new_receipt_title);
         receiptItemsList = findViewById(R.id.list_receipt_items);
         receiptTotalValueView = findViewById(R.id.text_receipt_total_value);
         nextButton = findViewById(R.id.button_next);
-        MaterialButton backButton = findViewById(R.id.button_back);
-        addParticipantButton = findViewById(R.id.button_add_participant);
+        View backButton = findViewById(R.id.button_back);
+        receiptActionsButton = findViewById(R.id.button_receipt_actions);
         captureButton = findViewById(R.id.button_take_picture);
 
         backgroundExecutor = Executors.newSingleThreadExecutor();
@@ -186,8 +197,8 @@ public class NewReceiptActivity extends AppCompatActivity {
         refreshDefaultParticipantPhoneNumber();
         requestPhoneNumberPermissionsIfNeeded();
 
-        backButton.setOnClickListener(view -> finish());
-        addParticipantButton.setOnClickListener(view -> openAddParticipantDialog());
+        backButton.setOnClickListener(view -> showAbandonReceiptDialog());
+        receiptActionsButton.setOnClickListener(this::showReceiptActionsMenu);
         nextButton.setOnClickListener(view -> showReceiptSummaryDialog());
         captureButton.setOnClickListener(view -> {
             if (hasCameraPermission()) {
@@ -197,6 +208,12 @@ public class NewReceiptActivity extends AppCompatActivity {
             }
         });
         cropReceiptButton.setOnClickListener(view -> cropAndAnalyzeReceipt());
+        getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                showAbandonReceiptDialog();
+            }
+        });
 
         if (handleSharedReceiptIntent(getIntent())) {
             return;
@@ -269,6 +286,91 @@ public class NewReceiptActivity extends AppCompatActivity {
         }
     }
 
+    private void showAbandonReceiptDialog() {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.abandon_receipt_title)
+                .setMessage(R.string.abandon_receipt_message)
+                .setPositiveButton(R.string.yes, (dialog, which) -> returnToMainMenu())
+                .setNegativeButton(R.string.no, null)
+                .show();
+    }
+
+    private void returnToMainMenu() {
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
+        finish();
+    }
+
+    private void showReceiptActionsMenu(View anchorView) {
+        PopupMenu popupMenu = new PopupMenu(this, anchorView);
+        popupMenu.inflate(R.menu.menu_new_receipt_actions);
+        popupMenu.setForceShowIcon(true);
+        tintPopupMenuIcons(popupMenu);
+        popupMenu.setOnMenuItemClickListener(menuItem -> {
+            int itemId = menuItem.getItemId();
+            if (itemId == R.id.action_add_participant) {
+                openAddParticipantDialog();
+                return true;
+            }
+            if (itemId == R.id.action_add_item) {
+                showAddReceiptItemDialog();
+                return true;
+            }
+            if (itemId == R.id.action_refresh_receipt) {
+                refreshReceiptFlow();
+                return true;
+            }
+            return false;
+        });
+        popupMenu.show();
+    }
+
+    private void tintPopupMenuIcons(@NonNull PopupMenu popupMenu) {
+        ColorStateList iconTint = resolvePopupMenuIconTint();
+        for (int index = 0; index < popupMenu.getMenu().size(); index++) {
+            Drawable icon = popupMenu.getMenu().getItem(index).getIcon();
+            if (icon == null) {
+                continue;
+            }
+
+            Drawable tintedIcon = DrawableCompat.wrap(icon.mutate());
+            DrawableCompat.setTintList(tintedIcon, iconTint);
+            popupMenu.getMenu().getItem(index).setIcon(tintedIcon);
+        }
+    }
+
+    @NonNull
+    private ColorStateList resolvePopupMenuIconTint() {
+        TypedValue typedValue = new TypedValue();
+        if (!getTheme().resolveAttribute(android.R.attr.textColorPrimary, typedValue, true)) {
+            return ColorStateList.valueOf(Color.BLACK);
+        }
+
+        if (typedValue.resourceId != 0) {
+            ColorStateList colorStateList = ContextCompat.getColorStateList(this, typedValue.resourceId);
+            if (colorStateList != null) {
+                return colorStateList;
+            }
+        }
+
+        return ColorStateList.valueOf(typedValue.data);
+    }
+
+    private void refreshReceiptFlow() {
+        if (lastSharedReceiptIntent != null) {
+            importSharedReceipt(new Intent(lastSharedReceiptIntent));
+            return;
+        }
+
+        if (lastRefreshableReceiptImageFile != null && lastRefreshableReceiptImageFile.exists()) {
+            refreshReceiptFromImageFile(lastRefreshableReceiptImageFile);
+            return;
+        }
+
+        Toast.makeText(this, R.string.refresh_unavailable, Toast.LENGTH_SHORT).show();
+    }
+
     private boolean handleSharedReceiptIntent(@Nullable Intent intent) {
         if (intent == null) {
             return false;
@@ -279,17 +381,17 @@ public class NewReceiptActivity extends AppCompatActivity {
             return false;
         }
 
+        lastSharedReceiptIntent = new Intent(intent);
+        lastRefreshableReceiptImageFile = null;
         importSharedReceipt(intent);
         return true;
     }
 
     private void importSharedReceipt(@NonNull Intent intent) {
+        clearCurrentReceiptResults();
         stopCameraPreview();
         previewView.setVisibility(View.GONE);
         captureButton.setVisibility(View.GONE);
-        cropReceiptLayout.setVisibility(View.GONE);
-        receiptResultsLayout.setVisibility(View.GONE);
-        setParticipantControlsVisible(false);
         showStatusMessage(R.string.importing_shared_receipt, false);
 
         backgroundExecutor.execute(() -> {
@@ -811,6 +913,8 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     private void analyzeCroppedReceipt(File croppedFile) {
+        lastRefreshableReceiptImageFile = croppedFile;
+        lastSharedReceiptIntent = null;
         InputImage inputImage;
         try {
             inputImage = InputImage.fromFilePath(this, Uri.fromFile(croppedFile));
@@ -822,6 +926,44 @@ public class NewReceiptActivity extends AppCompatActivity {
         textRecognizer.process(inputImage)
                 .addOnSuccessListener(this::handleCroppedRecognition)
                 .addOnFailureListener(exception -> onCroppedReceiptNotDetected());
+    }
+
+    private void refreshReceiptFromImageFile(@NonNull File imageFile) {
+        clearCurrentReceiptResults();
+        stopCameraPreview();
+        previewView.setVisibility(View.GONE);
+        captureButton.setVisibility(View.GONE);
+        showStatusMessage(R.string.refreshing_receipt, false);
+
+        InputImage inputImage;
+        try {
+            inputImage = InputImage.fromFilePath(this, Uri.fromFile(imageFile));
+        } catch (IOException exception) {
+            handleReceiptRefreshFailure(R.string.shared_receipt_open_failed);
+            return;
+        }
+
+        textRecognizer.process(inputImage)
+                .addOnSuccessListener(this::handleRefreshedReceiptRecognition)
+                .addOnFailureListener(exception -> handleReceiptRefreshFailure(
+                        R.string.shared_receipt_open_failed
+                ));
+    }
+
+    private void handleRefreshedReceiptRecognition(Text recognizedText) {
+        ArrayList<String> lines = extractRecognizedLines(recognizedText);
+        ArrayList<ReceiptParser.ReceiptItem> detectedItems = receiptParser.extractReceiptItems(lines);
+
+        if (receiptParser.isReceiptDetected(lines, detectedItems) && !detectedItems.isEmpty()) {
+            showReceiptResults(detectedItems);
+        } else {
+            handleReceiptRefreshFailure(R.string.no_receipt_detected);
+        }
+    }
+
+    private void handleReceiptRefreshFailure(int messageResId) {
+        cameraStatusView.setVisibility(View.GONE);
+        Toast.makeText(this, messageResId, Toast.LENGTH_SHORT).show();
     }
 
     private void handleCroppedRecognition(Text recognizedText) {
@@ -968,12 +1110,25 @@ public class NewReceiptActivity extends AppCompatActivity {
         applyDefaultParticipantSelections();
         refreshReceiptItems();
 
+        showReceiptResultsUi();
+    }
+
+    private void showReceiptResultsUi() {
+        stopCameraPreview();
         cameraStatusView.setVisibility(View.GONE);
         previewView.setVisibility(View.GONE);
         cropReceiptLayout.setVisibility(View.GONE);
         captureButton.setVisibility(View.GONE);
         receiptResultsLayout.setVisibility(View.VISIBLE);
         setParticipantControlsVisible(true);
+    }
+
+    private void clearCurrentReceiptResults() {
+        receiptItems.clear();
+        refreshReceiptItems();
+        receiptResultsLayout.setVisibility(View.GONE);
+        cropReceiptLayout.setVisibility(View.GONE);
+        setParticipantControlsVisible(false);
     }
 
     private void refreshReceiptItems() {
@@ -1060,6 +1215,68 @@ public class NewReceiptActivity extends AppCompatActivity {
             });
         });
         dialog.show();
+    }
+
+    private void showAddReceiptItemDialog() {
+        View dialogView = getLayoutInflater().inflate(R.layout.dialog_add_receipt_item, null);
+        TextInputLayout nameInputLayout =
+                dialogView.findViewById(R.id.input_layout_receipt_item_name);
+        TextInputLayout priceInputLayout =
+                dialogView.findViewById(R.id.input_layout_receipt_item_price);
+        TextInputEditText nameInputView =
+                dialogView.findViewById(R.id.edit_receipt_item_name);
+        TextInputEditText priceInputView =
+                dialogView.findViewById(R.id.edit_receipt_item_price);
+
+        priceInputView.setInputType(
+                InputType.TYPE_CLASS_NUMBER
+                        | InputType.TYPE_NUMBER_FLAG_DECIMAL
+                        | InputType.TYPE_NUMBER_FLAG_SIGNED
+        );
+
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.add_new_item_title)
+                .setView(dialogView)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.add, null)
+                .create();
+
+        dialog.setOnShowListener(dialogInterface ->
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+                    String itemName = getText(nameInputView);
+                    String enteredPrice = getText(priceInputView);
+
+                    nameInputLayout.setError(null);
+                    priceInputLayout.setError(null);
+
+                    boolean hasError = false;
+                    if (itemName.isEmpty()) {
+                        nameInputLayout.setError(getString(R.string.receipt_item_name_required));
+                        hasError = true;
+                    }
+
+                    Integer amountCents = receiptParser.parseEnteredPriceToCents(enteredPrice);
+                    if (amountCents == null) {
+                        priceInputLayout.setError(getString(R.string.invalid_receipt_price));
+                        hasError = true;
+                    }
+
+                    if (hasError || amountCents == null) {
+                        return;
+                    }
+
+                    addReceiptItem(itemName, amountCents);
+                    dialog.dismiss();
+                }));
+        dialog.show();
+    }
+
+    private void addReceiptItem(@NonNull String itemName, int amountCents) {
+        ReceiptParser.ReceiptItem item = new ReceiptParser.ReceiptItem(itemName, amountCents);
+        selectAllParticipantsForItem(item);
+        receiptItems.add(item);
+        refreshReceiptItems();
+        showReceiptResultsUi();
     }
 
     private void showAddParticipantDialog(boolean contactsPermissionGranted) {
@@ -1383,9 +1600,13 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private void applyDefaultParticipantSelections() {
         for (ReceiptParser.ReceiptItem item : receiptItems) {
-            for (Participant participant : participants) {
-                item.selectParticipant(participant.key);
-            }
+            selectAllParticipantsForItem(item);
+        }
+    }
+
+    private void selectAllParticipantsForItem(ReceiptParser.ReceiptItem item) {
+        for (Participant participant : participants) {
+            item.selectParticipant(participant.key);
         }
     }
 
@@ -1406,8 +1627,8 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private void setParticipantControlsVisible(boolean visible) {
         participantControlsVisible = visible;
-        if (addParticipantButton != null) {
-            addParticipantButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (receiptActionsButton != null) {
+            receiptActionsButton.setVisibility(visible ? View.VISIBLE : View.GONE);
         }
         if (visible) {
             refreshParticipantButtons();
@@ -1546,6 +1767,8 @@ public class NewReceiptActivity extends AppCompatActivity {
         SmsManager smsManager = SmsManager.getDefault();
         int sentCount = 0;
         int skippedCount = 0;
+        ArrayList<ReceiptHistoryStore.ParticipantShare> historyParticipants =
+                buildHistoryParticipantShares();
 
         for (Participant participant : participants) {
             if (isDefaultParticipant(participant)) {
@@ -1586,7 +1809,12 @@ public class NewReceiptActivity extends AppCompatActivity {
 
         if (sentCount == 0) {
             Toast.makeText(this, R.string.send_requests_none, Toast.LENGTH_SHORT).show();
+            returnToMainMenu();
             return;
+        }
+
+        if (!historyParticipants.isEmpty()) {
+            saveReceiptHistoryEntry(historyParticipants);
         }
 
         int messageResId = skippedCount == 0
@@ -1597,6 +1825,7 @@ public class NewReceiptActivity extends AppCompatActivity {
                 getString(messageResId, sentCount, skippedCount),
                 Toast.LENGTH_SHORT
         ).show();
+        returnToMainMenu();
     }
 
     private BigDecimal computeParticipantShareTotal(Participant participant) {
@@ -1634,6 +1863,64 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private String formatCurrency(BigDecimal amount) {
         return amount.setScale(2, RoundingMode.HALF_UP).toPlainString().replace('.', ',');
+    }
+
+    @NonNull
+    private ArrayList<ReceiptHistoryStore.ParticipantShare> buildHistoryParticipantShares() {
+        ArrayList<ReceiptHistoryStore.ParticipantShare> participantShares = new ArrayList<>();
+        for (Participant participant : participants) {
+            if (isDefaultParticipant(participant)) {
+                continue;
+            }
+
+            BigDecimal participantTotal = computeParticipantShareTotal(participant);
+            if (participantTotal.compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
+            }
+
+            participantShares.add(new ReceiptHistoryStore.ParticipantShare(
+                    participant.name,
+                    formatCurrency(participantTotal)
+            ));
+        }
+        return participantShares;
+    }
+
+    private void saveReceiptHistoryEntry(
+            @NonNull ArrayList<ReceiptHistoryStore.ParticipantShare> participantShares
+    ) {
+        ReceiptHistoryStore.saveEntry(
+                this,
+                new ReceiptHistoryStore.HistoryEntry(
+                        getCurrentReceiptName(),
+                        receiptParser.formatAmount(computeReceiptTotalCents()),
+                        getCurrentHistoryDate(),
+                        participantShares
+                )
+        );
+    }
+
+    @NonNull
+    private String getCurrentReceiptName() {
+        if (receiptTitleView == null) {
+            return getString(R.string.new_receipt_screen_title);
+        }
+
+        String title = normalizeWhitespace(receiptTitleView.getText().toString());
+        return title.isEmpty() ? getString(R.string.new_receipt_screen_title) : title;
+    }
+
+    private int computeReceiptTotalCents() {
+        int totalCents = 0;
+        for (ReceiptParser.ReceiptItem item : receiptItems) {
+            totalCents += item.getAmountCents();
+        }
+        return totalCents;
+    }
+
+    @NonNull
+    private String getCurrentHistoryDate() {
+        return LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd", Locale.US));
     }
 
     private void removeParticipant(Participant participant) {

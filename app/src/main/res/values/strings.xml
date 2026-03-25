@@ -3,8 +3,14 @@
     <string name="app_name">Receipt Scanner</string>
     <string name="home_title">Receipt Scanner</string>
     <string name="home_subtitle">Choose what you want to do from the main menu.</string>
+    <string name="abandon_receipt_title">Abandon Receipt?</string>
+    <string name="abandon_receipt_message">Are you sure you want to abandon this receipt and return to the main menu?</string>
     <string name="button_new_receipt">New Receipt</string>
     <string name="new_receipt_screen_title">New Receipt</string>
+    <string name="history_screen_title">History</string>
+    <string name="history_empty">No receipts have been sent yet.</string>
+    <string name="history_no_participants">No participant details available.</string>
+    <string name="receipt_actions">Receipt actions</string>
     <string name="button_take_picture">Take Picture</string>
     <string name="button_crop_receipt">Crop and Scan</string>
     <string name="camera_permission_required">Camera permission is required to photograph a receipt.</string>
@@ -12,6 +18,7 @@
     <string name="photo_save_failed">Unable to save the photo.</string>
     <string name="scanning_receipt">Scanning receipt...</string>
     <string name="importing_shared_receipt">Importing shared receipt...</string>
+    <string name="refreshing_receipt">Refreshing receipt...</string>
     <string name="preparing_crop">Preparing crop...</string>
     <string name="scanning_cropped_receipt">Scanning cropped receipt...</string>
     <string name="crop_receipt_hint">Adjust the crop box so it only covers the receipt.</string>
@@ -20,6 +27,8 @@
     <string name="shared_receipt_open_failed">Unable to open the shared receipt.</string>
     <string name="shared_receipt_empty">No receipt data was shared.</string>
     <string name="receipt_items_title">Receipt Items</string>
+    <string name="receipt_item_name_hint">Item name</string>
+    <string name="receipt_item_name_required">Enter an item name.</string>
     <string name="receipt_total_label">Total</string>
     <string name="edit_receipt_item_price_label">Price</string>
     <string name="invalid_receipt_price">Enter a valid price.</string>
@@ -37,6 +46,9 @@
     <string name="contact_phone_invalid">Enter a valid phone number</string>
     <string name="add_new_contact">Add New Contact</string>
     <string name="add_new_participant_title">Add New Participant</string>
+    <string name="add_new_item_title">Add New Item</string>
+    <string name="add_participant">Add Participant</string>
+    <string name="add_item">Add Item</string>
     <string name="phone_contacts_title">Phone Contacts</string>
     <string name="loading_phone_contacts">Loading phone contacts...</string>
     <string name="phone_contacts_permission_required">Allow contacts permission to load phone contacts.</string>
@@ -46,6 +58,10 @@
     <string name="participant_total_label">Total to pay</string>
     <string name="participant_phone_unavailable">Phone number unavailable</string>
     <string name="next">Next</string>
+    <string name="refresh">Refresh</string>
+    <string name="refresh_unavailable">Unable to refresh this receipt.</string>
+    <string name="yes">Yes</string>
+    <string name="no">No</string>
     <string name="receipt_summary_title">Receipt Summary</string>
     <string name="send_requests">Send Requests</string>
     <string name="participant_payment_request_message">Hi %1$s, your share of this receipt is %2$s SEK. Please send it to me via Swish.</string>
