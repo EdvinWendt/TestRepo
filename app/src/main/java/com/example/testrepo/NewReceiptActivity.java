@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
+import android.app.Dialog;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -30,9 +31,13 @@ import android.text.InputType;
 import android.text.TextWatcher;
 import android.util.Patterns;
 import android.util.TypedValue;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -45,6 +50,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.AppCompatImageView;
 import androidx.appcompat.widget.PopupMenu;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageCapture;
@@ -104,7 +110,8 @@ public class NewReceiptActivity extends AppCompatActivity {
     private MaterialButton cropReceiptButton;
     private View receiptResultsLayout;
     private LinearLayout participantButtonsLayout;
-    private TextView receiptTitleView;
+    private TextInputEditText receiptTitleView;
+    private AppCompatImageView receiptTitleIconView;
     private View receiptActionsButton;
     private ListView receiptItemsList;
     private TextView receiptTotalValueView;
@@ -120,6 +127,8 @@ public class NewReceiptActivity extends AppCompatActivity {
     private boolean participantControlsVisible;
     private boolean sendRequestsAfterSmsPermission;
     private boolean showAddParticipantDialogAfterContactsPermission;
+    @NonNull
+    private String pendingSendRequestsMessage = "";
     @Nullable
     private Intent lastSharedReceiptIntent;
     @Nullable
@@ -152,6 +161,7 @@ public class NewReceiptActivity extends AppCompatActivity {
                     sendParticipantPaymentRequests();
                 } else if (!isGranted) {
                     sendRequestsAfterSmsPermission = false;
+                    pendingSendRequestsMessage = "";
                     Toast.makeText(
                             this,
                             R.string.send_requests_permission_required,
@@ -173,6 +183,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         receiptResultsLayout = findViewById(R.id.layout_receipt_results);
         participantButtonsLayout = findViewById(R.id.layout_participant_buttons);
         receiptTitleView = findViewById(R.id.text_new_receipt_title);
+        receiptTitleIconView = findViewById(R.id.image_receipt_title_edit);
         receiptItemsList = findViewById(R.id.list_receipt_items);
         receiptTotalValueView = findViewById(R.id.text_receipt_total_value);
         nextButton = findViewById(R.id.button_next);
@@ -188,6 +199,7 @@ public class NewReceiptActivity extends AppCompatActivity {
                 showEditReceiptItemDialog(receiptItems.get(position));
             }
         });
+        configureReceiptTitleInput();
         ensureDefaultParticipant();
         refreshParticipantButtons();
         setParticipantControlsVisible(false);
@@ -300,6 +312,116 @@ public class NewReceiptActivity extends AppCompatActivity {
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         startActivity(intent);
         finish();
+    }
+
+    private void configureReceiptTitleInput() {
+        if (receiptTitleView == null) {
+            return;
+        }
+
+        receiptTitleView.setOnFocusChangeListener((view, hasFocus) -> updateReceiptTitleIcon());
+        receiptTitleView.setOnEditorActionListener((view, actionId, event) -> {
+            boolean confirmAction = actionId == EditorInfo.IME_ACTION_DONE
+                    || actionId == EditorInfo.IME_ACTION_GO
+                    || actionId == EditorInfo.IME_ACTION_SEND
+                    || actionId == EditorInfo.IME_ACTION_NEXT
+                    || (event != null
+                    && event.getAction() == KeyEvent.ACTION_DOWN
+                    && event.getKeyCode() == KeyEvent.KEYCODE_ENTER);
+            if (!confirmAction) {
+                return false;
+            }
+
+            clearReceiptTitleFocus();
+            return true;
+        });
+        receiptTitleView.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                updateReceiptTitleIcon();
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+            }
+        });
+        receiptTitleView.addOnLayoutChangeListener(
+                (view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
+                        updateReceiptTitleIcon()
+        );
+        receiptTitleView.post(this::updateReceiptTitleIcon);
+    }
+
+    private void clearReceiptTitleFocus() {
+        clearTextInputFocus(receiptTitleView, findViewById(R.id.layout_new_receipt_root));
+    }
+
+    private void clearTextInputFocus(@Nullable TextInputEditText inputView, @Nullable View fallbackView) {
+        if (inputView == null) {
+            return;
+        }
+
+        if (fallbackView != null) {
+            fallbackView.requestFocus();
+        }
+
+        InputMethodManager inputMethodManager =
+                ContextCompat.getSystemService(this, InputMethodManager.class);
+        if (inputMethodManager != null) {
+            inputMethodManager.hideSoftInputFromWindow(inputView.getWindowToken(), 0);
+        }
+
+        inputView.clearFocus();
+    }
+
+    private void updateReceiptTitleIcon() {
+        if (receiptTitleView == null || receiptTitleIconView == null) {
+            return;
+        }
+
+        if (receiptTitleView.isFocused()) {
+            receiptTitleIconView.setVisibility(View.INVISIBLE);
+            return;
+        }
+
+        int editWidth = receiptTitleView.getWidth();
+        int iconWidth = receiptTitleIconView.getWidth();
+        if (editWidth == 0 || iconWidth == 0) {
+            receiptTitleIconView.post(this::updateReceiptTitleIcon);
+            return;
+        }
+
+        CharSequence text = receiptTitleView.getText();
+        String displayedText = text == null ? "" : text.toString();
+
+        int editLeft = receiptTitleView.getLeft();
+        int contentStart = editLeft + receiptTitleView.getPaddingStart();
+        int contentEnd = editLeft + editWidth - receiptTitleView.getPaddingEnd();
+        int contentWidth = Math.max(0, contentEnd - contentStart);
+        float textWidth = displayedText.isEmpty()
+                ? 0f
+                : receiptTitleView.getPaint().measureText(displayedText);
+        int iconGap = dpToPx(8);
+
+        float desiredIconX;
+        if (displayedText.isEmpty()) {
+            desiredIconX = contentStart;
+        } else {
+            float textStart = contentStart + Math.max(0f, (contentWidth - textWidth) / 2f);
+            desiredIconX = textStart - iconWidth - iconGap;
+        }
+
+        float minimumIconX = contentStart;
+        float maximumIconX = contentEnd - iconWidth;
+        float clampedIconX = Math.max(minimumIconX, Math.min(desiredIconX, maximumIconX));
+
+        receiptTitleIconView.setX(clampedIconX);
+        receiptTitleIconView.setVisibility(View.VISIBLE);
+        receiptTitleIconView.bringToFront();
     }
 
     private void showReceiptActionsMenu(View anchorView) {
@@ -1150,7 +1272,7 @@ public class NewReceiptActivity extends AppCompatActivity {
             return;
         }
 
-        if (receiptItems.isEmpty()) {
+        if (receiptItems.isEmpty() || participants.size() <= 1) {
             nextButton.setEnabled(false);
             return;
         }
@@ -1167,11 +1289,19 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private void showEditReceiptItemDialog(ReceiptParser.ReceiptItem item) {
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_edit_receipt_item, null);
+        TextInputLayout nameInputLayout =
+                dialogView.findViewById(R.id.input_layout_receipt_item_name);
         TextInputLayout priceInputLayout =
                 dialogView.findViewById(R.id.input_layout_receipt_item_price);
+        TextInputEditText nameInputView =
+                dialogView.findViewById(R.id.edit_receipt_item_name);
         TextInputEditText priceInputView =
                 dialogView.findViewById(R.id.edit_receipt_item_price);
 
+        nameInputView.setText(item.getName());
+        if (nameInputView.getText() != null) {
+            nameInputView.setSelection(nameInputView.getText().length());
+        }
         priceInputView.setInputType(
                 InputType.TYPE_CLASS_NUMBER
                         | InputType.TYPE_NUMBER_FLAG_DECIMAL
@@ -1183,11 +1313,12 @@ public class NewReceiptActivity extends AppCompatActivity {
         }
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle(item.getName())
+                .setTitle(R.string.edit_receipt_item_title)
                 .setView(dialogView)
                 .setNegativeButton(R.string.remove, null)
                 .setPositiveButton(R.string.ok, null)
                 .create();
+        applyDialogAnimations(dialog);
 
         dialog.setOnShowListener(dialogInterface -> {
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(view -> {
@@ -1197,18 +1328,29 @@ public class NewReceiptActivity extends AppCompatActivity {
             });
 
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
-                String enteredPrice = "";
-                if (priceInputView.getText() != null) {
-                    enteredPrice = priceInputView.getText().toString().trim();
+                String itemName = getText(nameInputView);
+                String enteredPrice = getText(priceInputView);
+
+                nameInputLayout.setError(null);
+                priceInputLayout.setError(null);
+
+                boolean hasError = false;
+                if (itemName.isEmpty()) {
+                    nameInputLayout.setError(getString(R.string.receipt_item_name_required));
+                    hasError = true;
                 }
 
                 Integer updatedAmountCents = receiptParser.parseEnteredPriceToCents(enteredPrice);
                 if (updatedAmountCents == null) {
                     priceInputLayout.setError(getString(R.string.invalid_receipt_price));
+                    hasError = true;
+                }
+
+                if (hasError || updatedAmountCents == null) {
                     return;
                 }
 
-                priceInputLayout.setError(null);
+                item.setName(itemName);
                 item.setAmountCents(updatedAmountCents);
                 refreshReceiptItems();
                 dialog.dismiss();
@@ -1240,6 +1382,7 @@ public class NewReceiptActivity extends AppCompatActivity {
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.add, null)
                 .create();
+        applyDialogAnimations(dialog);
 
         dialog.setOnShowListener(dialogInterface ->
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
@@ -1277,6 +1420,14 @@ public class NewReceiptActivity extends AppCompatActivity {
         receiptItems.add(item);
         refreshReceiptItems();
         showReceiptResultsUi();
+    }
+
+    private void applyDialogAnimations(@NonNull AlertDialog dialog) {
+        if (dialog.getWindow() == null) {
+            return;
+        }
+
+        dialog.getWindow().setWindowAnimations(R.style.TestRepo_DialogAnimation);
     }
 
     private void showAddParticipantDialog(boolean contactsPermissionGranted) {
@@ -1628,7 +1779,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     private void setParticipantControlsVisible(boolean visible) {
         participantControlsVisible = visible;
         if (receiptActionsButton != null) {
-            receiptActionsButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+            receiptActionsButton.setVisibility(visible ? View.VISIBLE : View.INVISIBLE);
         }
         if (visible) {
             refreshParticipantButtons();
@@ -1725,10 +1876,15 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private void showReceiptSummaryDialog() {
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_receipt_summary, null);
+        View summaryRootView = dialogView.findViewById(R.id.layout_receipt_summary_root);
         LinearLayout summaryRowsLayout = dialogView.findViewById(R.id.layout_receipt_summary_rows);
+        TextInputEditText messageInputView =
+                dialogView.findViewById(R.id.edit_receipt_summary_message);
+        View closeButton = dialogView.findViewById(R.id.button_close_receipt_summary);
         MaterialButton sendRequestsButton = dialogView.findViewById(R.id.button_send_requests);
 
-        for (Participant participant : participants) {
+        for (int index = 0; index < participants.size(); index++) {
+            Participant participant = participants.get(index);
             View rowView = getLayoutInflater().inflate(
                     R.layout.item_receipt_summary_participant,
                     summaryRowsLayout,
@@ -1736,25 +1892,49 @@ public class NewReceiptActivity extends AppCompatActivity {
             );
             TextView nameView = rowView.findViewById(R.id.text_summary_participant_name);
             TextView amountView = rowView.findViewById(R.id.text_summary_participant_amount);
+            View dividerView = rowView.findViewById(R.id.view_summary_participant_divider);
 
             nameView.setText(participant.name);
             amountView.setText(formatCurrency(computeParticipantShareTotal(participant)));
+            dividerView.setVisibility(index == participants.size() - 1 ? View.GONE : View.VISIBLE);
             summaryRowsLayout.addView(rowView);
         }
 
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.receipt_summary_title)
-                .setView(dialogView)
-                .create();
+        Dialog dialog = new Dialog(this, R.style.TestRepo_FullScreenDialog) {
+            @Override
+            public boolean dispatchTouchEvent(@NonNull MotionEvent event) {
+                if (event.getAction() == MotionEvent.ACTION_DOWN
+                        && messageInputView.isFocused()) {
+                    Rect messageBounds = new Rect();
+                    messageInputView.getGlobalVisibleRect(messageBounds);
+                    if (!messageBounds.contains((int) event.getRawX(), (int) event.getRawY())) {
+                        clearTextInputFocus(messageInputView, summaryRootView);
+                    }
+                }
+
+                return super.dispatchTouchEvent(event);
+            }
+        };
+        dialog.setContentView(dialogView);
+        dialog.setCancelable(true);
+        closeButton.setOnClickListener(view -> dialog.dismiss());
 
         sendRequestsButton.setOnClickListener(view -> {
             dialog.dismiss();
-            openSendRequestsFlow();
+            openSendRequestsFlow(getText(messageInputView));
         });
+
         dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+            );
+        }
     }
 
-    private void openSendRequestsFlow() {
+    private void openSendRequestsFlow(@NonNull String customMessage) {
+        pendingSendRequestsMessage = customMessage.trim();
         if (!hasSendSmsPermission()) {
             sendRequestsAfterSmsPermission = true;
             requestSendSmsPermissionLauncher.launch(Manifest.permission.SEND_SMS);
@@ -1764,9 +1944,13 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     private void sendParticipantPaymentRequests() {
+        String customMessage = pendingSendRequestsMessage;
+        pendingSendRequestsMessage = "";
         SmsManager smsManager = SmsManager.getDefault();
         int sentCount = 0;
         int skippedCount = 0;
+        String receiptName = getCurrentReceiptName();
+        String receiptTotal = formatCurrency(BigDecimal.valueOf(computeReceiptTotalCents(), 2));
         ArrayList<ReceiptHistoryStore.ParticipantShare> historyParticipants =
                 buildHistoryParticipantShares();
 
@@ -1785,8 +1969,15 @@ public class NewReceiptActivity extends AppCompatActivity {
             String message = getString(
                     R.string.participant_payment_request_message,
                     participant.name,
+                    receiptName,
+                    receiptTotal,
                     formatCurrency(participantTotal)
             );
+            if (!customMessage.isEmpty()) {
+                message = message
+                        + "\n\n"
+                        + getString(R.string.participant_payment_request_custom_message, customMessage);
+            }
 
             try {
                 ArrayList<String> messageParts = smsManager.divideMessage(message);
@@ -2381,6 +2572,21 @@ public class NewReceiptActivity extends AppCompatActivity {
         captureButton.setVisibility(View.VISIBLE);
         setParticipantControlsVisible(false);
         showCameraStatus(R.string.camera_unavailable);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_DOWN
+                && receiptTitleView != null
+                && receiptTitleView.isFocused()) {
+            Rect titleBounds = new Rect();
+            receiptTitleView.getGlobalVisibleRect(titleBounds);
+            if (!titleBounds.contains((int) event.getRawX(), (int) event.getRawY())) {
+                clearReceiptTitleFocus();
+            }
+        }
+
+        return super.dispatchTouchEvent(event);
     }
 
     @Override

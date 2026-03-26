@@ -448,7 +448,7 @@ final class ReceiptParser {
 
     private static final class ParsedRow {
         private final RowKind kind;
-        private final String name;
+        private String name;
         private final int amountCents;
 
         private ParsedRow(RowKind kind, String name, int amountCents) {
@@ -484,7 +484,7 @@ final class ReceiptParser {
     }
 
     static final class ReceiptItem {
-        private final String name;
+        private String name;
         private int amountCents;
         private final Set<String> selectedParticipantKeys = new HashSet<>();
 
@@ -496,6 +496,10 @@ final class ReceiptParser {
         @NonNull
         String getName() {
             return name;
+        }
+
+        void setName(@NonNull String name) {
+            this.name = name;
         }
 
         @NonNull

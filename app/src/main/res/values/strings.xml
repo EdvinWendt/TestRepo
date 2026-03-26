@@ -29,6 +29,7 @@
     <string name="receipt_items_title">Receipt Items</string>
     <string name="receipt_item_name_hint">Item name</string>
     <string name="receipt_item_name_required">Enter an item name.</string>
+    <string name="edit_receipt_item_title">Edit Item</string>
     <string name="receipt_total_label">Total</string>
     <string name="edit_receipt_item_price_label">Price</string>
     <string name="invalid_receipt_price">Enter a valid price.</string>
@@ -63,8 +64,12 @@
     <string name="yes">Yes</string>
     <string name="no">No</string>
     <string name="receipt_summary_title">Receipt Summary</string>
+    <string name="receipt_summary_message_label">Message</string>
     <string name="send_requests">Send Requests</string>
-    <string name="participant_payment_request_message">Hi %1$s, your share of this receipt is %2$s SEK. Please send it to me via Swish.</string>
+    <string name="participant_payment_request_message">Hello, %1$s!
+The total price of the %2$s receipt is %3$s. Your share is %4$s, please send it to me via swish.</string>
+    <string name="participant_payment_request_custom_message">Message:
+%1$s</string>
     <string name="send_requests_success">Sent %1$d payment reminders.</string>
     <string name="send_requests_partial">Sent %1$d payment reminders. Skipped %2$d participants.</string>
     <string name="send_requests_none">No participant requests to send.</string>
