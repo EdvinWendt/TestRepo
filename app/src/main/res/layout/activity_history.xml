@@ -28,6 +28,19 @@
             android:tint="@android:color/white"
             app:srcCompat="@drawable/ic_back_chevron" />
 
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/button_history_actions"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/more_options"
+            android:padding="8dp"
+            android:scaleType="center"
+            android:tint="@android:color/white"
+            app:srcCompat="@drawable/ic_more_vert" />
+
         <TextView
             android:id="@+id/text_history_title"
             android:layout_width="wrap_content"

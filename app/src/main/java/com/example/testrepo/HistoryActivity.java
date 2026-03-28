@@ -28,6 +28,7 @@ public class HistoryActivity extends AppCompatActivity {
         setContentView(R.layout.activity_history);
 
         View backButton = findViewById(R.id.button_back);
+        View settingsMenuButton = findViewById(R.id.button_history_actions);
         ListView historyListView = findViewById(R.id.list_history_receipts);
 
         historyEntriesAdapter = new HistoryEntriesAdapter();
@@ -40,6 +41,9 @@ public class HistoryActivity extends AppCompatActivity {
             }
         });
         backButton.setOnClickListener(view -> finish());
+        settingsMenuButton.setOnClickListener(
+                view -> SettingsMenuHelper.showSettingsMenu(this, view)
+        );
     }
 
     @Override

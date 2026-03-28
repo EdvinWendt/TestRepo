@@ -105,6 +105,9 @@ public class NewReceiptActivity extends AppCompatActivity {
     private static final int MAX_IMPORTED_PDF_PAGE_DIMENSION = 2800;
     private static final int MAX_PARTICIPANT_BUTTONS_PER_ROW = 5;
     private static final int MAX_ITEM_PARTICIPANT_BUTTONS_PER_ROW = 4;
+    private static final int ACTIONS_MODE_HIDDEN = 0;
+    private static final int ACTIONS_MODE_SETTINGS_ONLY = 1;
+    private static final int ACTIONS_MODE_RECEIPT = 2;
     private static final int UNCHECKED_PARTICIPANT_COLOR = 0xFF8A8A8A;
     private static final String DEFAULT_PARTICIPANT_NAME = "You";
     private static final String DEFAULT_PARTICIPANT_KEY = "participant_you";
@@ -133,6 +136,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     private final ArrayList<ReceiptParser.ReceiptItem> trackedReceiptItems = new ArrayList<>();
     private final ArrayList<Participant> participants = new ArrayList<>();
     private ReceiptItemsAdapter receiptItemsAdapter;
+    private int actionsMenuMode = ACTIONS_MODE_HIDDEN;
     private boolean participantControlsVisible;
     private boolean sendRequestsAfterSmsPermission;
     private boolean showAddParticipantDialogAfterContactsPermission;
@@ -226,7 +230,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         requestPhoneNumberPermissionsIfNeeded();
 
         backButton.setOnClickListener(view -> showAbandonReceiptDialog());
-        receiptActionsButton.setOnClickListener(this::showReceiptActionsMenu);
+        receiptActionsButton.setOnClickListener(this::showActiveActionsMenu);
         nextButton.setOnClickListener(view -> showReceiptSummaryDialog());
         captureButton.setOnClickListener(view -> {
             if (hasCameraPermission()) {
@@ -450,6 +454,19 @@ public class NewReceiptActivity extends AppCompatActivity {
         receiptTitleIconView.setX(clampedIconX);
         receiptTitleIconView.setVisibility(View.VISIBLE);
         receiptTitleIconView.bringToFront();
+    }
+
+    private void showActiveActionsMenu(View anchorView) {
+        if (actionsMenuMode == ACTIONS_MODE_SETTINGS_ONLY) {
+            SettingsMenuHelper.showSettingsMenu(this, anchorView);
+            return;
+        }
+
+        if (actionsMenuMode != ACTIONS_MODE_RECEIPT) {
+            return;
+        }
+
+        showReceiptActionsMenu(anchorView);
     }
 
     private void showReceiptActionsMenu(View anchorView) {
@@ -912,6 +929,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         cameraStatusView.setVisibility(View.GONE);
         captureButton.setVisibility(View.VISIBLE);
         captureButton.setEnabled(true);
+        setActionsMenuMode(ACTIONS_MODE_SETTINGS_ONLY);
         setParticipantControlsVisible(false);
     }
 
@@ -1009,6 +1027,7 @@ public class NewReceiptActivity extends AppCompatActivity {
                     cameraStatusView.setVisibility(View.GONE);
                     cropReceiptLayout.setVisibility(View.VISIBLE);
                     cropReceiptButton.setEnabled(true);
+                    setActionsMenuMode(ACTIONS_MODE_SETTINGS_ONLY);
                 });
             } catch (IOException exception) {
                 runOnUiThread(() -> {
@@ -1435,6 +1454,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         cropReceiptLayout.setVisibility(View.GONE);
         captureButton.setVisibility(View.GONE);
         receiptResultsLayout.setVisibility(View.VISIBLE);
+        setActionsMenuMode(ACTIONS_MODE_RECEIPT);
         setParticipantControlsVisible(true);
     }
 
@@ -1444,6 +1464,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         refreshReceiptItems();
         receiptResultsLayout.setVisibility(View.GONE);
         cropReceiptLayout.setVisibility(View.GONE);
+        setActionsMenuMode(ACTIONS_MODE_HIDDEN);
         setParticipantControlsVisible(false);
     }
 
@@ -2001,9 +2022,6 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private void setParticipantControlsVisible(boolean visible) {
         participantControlsVisible = visible;
-        if (receiptActionsButton != null) {
-            receiptActionsButton.setVisibility(visible ? View.VISIBLE : View.INVISIBLE);
-        }
         if (visible) {
             refreshParticipantButtons();
         } else {
@@ -2560,6 +2578,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     private void onReceiptNotDetected() {
         cameraStatusView.setVisibility(View.GONE);
         captureButton.setEnabled(true);
+        setActionsMenuMode(ACTIONS_MODE_SETTINGS_ONLY);
         Toast.makeText(this, R.string.no_receipt_detected, Toast.LENGTH_SHORT).show();
     }
 
@@ -2567,6 +2586,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         cameraStatusView.setVisibility(View.GONE);
         cropReceiptLayout.setVisibility(View.VISIBLE);
         cropReceiptButton.setEnabled(true);
+        setActionsMenuMode(ACTIONS_MODE_SETTINGS_ONLY);
         Toast.makeText(this, R.string.no_receipt_detected, Toast.LENGTH_SHORT).show();
     }
 
@@ -2856,6 +2876,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         cameraStatusView.setText(stringResId);
         cameraStatusView.setVisibility(View.VISIBLE);
         cameraStatusView.bringToFront();
+        setActionsMenuMode(ACTIONS_MODE_HIDDEN);
         if (disableCaptureButton) {
             captureButton.setEnabled(false);
         }
@@ -2869,6 +2890,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         cameraStatusView.setText(R.string.camera_permission_required);
         cameraStatusView.setVisibility(View.VISIBLE);
         captureButton.setEnabled(true);
+        setActionsMenuMode(ACTIONS_MODE_SETTINGS_ONLY);
         setParticipantControlsVisible(false);
     }
 
@@ -2879,6 +2901,19 @@ public class NewReceiptActivity extends AppCompatActivity {
         captureButton.setVisibility(View.VISIBLE);
         setParticipantControlsVisible(false);
         showCameraStatus(R.string.camera_unavailable);
+        setActionsMenuMode(ACTIONS_MODE_SETTINGS_ONLY);
+    }
+
+    private void setActionsMenuMode(int mode) {
+        actionsMenuMode = mode;
+        if (receiptActionsButton == null) {
+            return;
+        }
+
+        receiptActionsButton.setVisibility(mode == ACTIONS_MODE_HIDDEN ? View.INVISIBLE : View.VISIBLE);
+        receiptActionsButton.setContentDescription(getString(
+                mode == ACTIONS_MODE_RECEIPT ? R.string.receipt_actions : R.string.more_options
+        ));
     }
 
     @Override
