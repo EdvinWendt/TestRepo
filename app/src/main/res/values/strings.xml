@@ -61,6 +61,11 @@
     <string name="next">Next</string>
     <string name="refresh">Refresh</string>
     <string name="refresh_unavailable">Unable to refresh this receipt.</string>
+    <string name="settings">Settings</string>
+    <string name="close">Close</string>
+    <string name="settings_empty_state">Settings coming soon.</string>
+    <string name="settings_auto_rotate_image_title">Auto Rotate Image</string>
+    <string name="settings_auto_rotate_image_description">Try to align the photo of the receipt horizontally before cropping.</string>
     <string name="yes">Yes</string>
     <string name="no">No</string>
     <string name="receipt_summary_title">Receipt Summary</string>

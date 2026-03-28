@@ -11,6 +11,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.graphics.pdf.PdfRenderer;
@@ -31,6 +32,7 @@ import android.text.InputType;
 import android.text.TextWatcher;
 import android.util.Patterns;
 import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.Surface;
@@ -39,6 +41,7 @@ import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -50,6 +53,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.AppCompatImageButton;
 import androidx.appcompat.widget.AppCompatImageView;
 import androidx.appcompat.widget.PopupMenu;
 import androidx.camera.core.CameraSelector;
@@ -97,6 +101,8 @@ import java.util.concurrent.Executors;
 public class NewReceiptActivity extends AppCompatActivity {
     private static final int MAX_CROP_BITMAP_DIMENSION = 2048;
     private static final int MAX_IMPORTED_PDF_PAGE_DIMENSION = 2800;
+    private static final int MAX_PARTICIPANT_BUTTONS_PER_ROW = 5;
+    private static final int MAX_ITEM_PARTICIPANT_BUTTONS_PER_ROW = 4;
     private static final int UNCHECKED_PARTICIPANT_COLOR = 0xFF8A8A8A;
     private static final String DEFAULT_PARTICIPANT_NAME = "You";
     private static final String DEFAULT_PARTICIPANT_KEY = "participant_you";
@@ -431,16 +437,16 @@ public class NewReceiptActivity extends AppCompatActivity {
         tintPopupMenuIcons(popupMenu);
         popupMenu.setOnMenuItemClickListener(menuItem -> {
             int itemId = menuItem.getItemId();
-            if (itemId == R.id.action_add_participant) {
-                openAddParticipantDialog();
-                return true;
-            }
             if (itemId == R.id.action_add_item) {
                 showAddReceiptItemDialog();
                 return true;
             }
             if (itemId == R.id.action_refresh_receipt) {
                 refreshReceiptFlow();
+                return true;
+            }
+            if (itemId == R.id.action_settings) {
+                SettingsDialogFragment.show(getSupportFragmentManager());
                 return true;
             }
             return false;
@@ -955,13 +961,16 @@ public class NewReceiptActivity extends AppCompatActivity {
         ArrayList<ReceiptParser.ReceiptItem> detectedItems = receiptParser.extractReceiptItems(lines);
 
         if (receiptParser.isReceiptDetected(lines, detectedItems)) {
-            showCropEditor(imageFile);
+            float autoRotateDegrees = AppSettings.isAutoRotateImageEnabled(this)
+                    ? computeReceiptAlignmentRotationDegrees(recognizedText)
+                    : 0f;
+            showCropEditor(imageFile, autoRotateDegrees);
         } else {
             onReceiptNotDetected();
         }
     }
 
-    private void showCropEditor(File imageFile) {
+    private void showCropEditor(File imageFile, float autoRotateDegrees) {
         stopCameraPreview();
         previewView.setVisibility(View.GONE);
         captureButton.setVisibility(View.GONE);
@@ -972,7 +981,7 @@ public class NewReceiptActivity extends AppCompatActivity {
 
         backgroundExecutor.execute(() -> {
             try {
-                Bitmap cropBitmap = loadBitmapForCropping(imageFile);
+                Bitmap cropBitmap = loadBitmapForCropping(imageFile, autoRotateDegrees);
                 runOnUiThread(() -> {
                     cropImageView.setImageBitmap(cropBitmap);
                     cameraStatusView.setVisibility(View.GONE);
@@ -1191,6 +1200,56 @@ public class NewReceiptActivity extends AppCompatActivity {
             }
         }
         return rows;
+    }
+
+    private float computeReceiptAlignmentRotationDegrees(@NonNull Text recognizedText) {
+        double weightedAngleSum = 0d;
+        double totalWeight = 0d;
+
+        for (Text.TextBlock block : recognizedText.getTextBlocks()) {
+            for (Text.Line line : block.getLines()) {
+                Point[] cornerPoints = line.getCornerPoints();
+                if (cornerPoints == null || cornerPoints.length < 2) {
+                    continue;
+                }
+
+                Point startPoint = cornerPoints[0];
+                Point endPoint = cornerPoints[1];
+                float deltaX = endPoint.x - startPoint.x;
+                float deltaY = endPoint.y - startPoint.y;
+                double width = Math.hypot(deltaX, deltaY);
+                if (width < dpToPx(24)) {
+                    continue;
+                }
+
+                double angleDegrees = Math.toDegrees(Math.atan2(deltaY, deltaX));
+                angleDegrees = normalizeTextAngle(angleDegrees);
+
+                weightedAngleSum += angleDegrees * width;
+                totalWeight += width;
+            }
+        }
+
+        if (totalWeight == 0d) {
+            return 0f;
+        }
+
+        double averageAngleDegrees = weightedAngleSum / totalWeight;
+        if (Math.abs(averageAngleDegrees) < 0.75d) {
+            return 0f;
+        }
+
+        return (float) -averageAngleDegrees;
+    }
+
+    private double normalizeTextAngle(double angleDegrees) {
+        while (angleDegrees <= -90d) {
+            angleDegrees += 180d;
+        }
+        while (angleDegrees > 90d) {
+            angleDegrees -= 180d;
+        }
+        return angleDegrees;
     }
 
     private ArrayList<String> chooseBetterRecognizedRows(
@@ -1810,36 +1869,88 @@ public class NewReceiptActivity extends AppCompatActivity {
         updateParticipantButtonsVisibility();
         int buttonSize = dpToPx(52);
         int buttonSpacing = dpToPx(6);
+        int rowSpacing = dpToPx(8);
 
+        ArrayList<View> participantBadgeButtons = new ArrayList<>();
         for (Participant participant : participants) {
-            MaterialButton participantButton = new MaterialButton(this);
-            LinearLayout.LayoutParams layoutParams =
-                    new LinearLayout.LayoutParams(buttonSize, buttonSize);
-            layoutParams.setMargins(buttonSpacing, 0, buttonSpacing, 0);
-            participantButton.setLayoutParams(layoutParams);
-            participantButton.setText(getParticipantBadgeLabel(participant));
-            participantButton.setAllCaps(false);
-            participantButton.setTextSize(
-                    TypedValue.COMPLEX_UNIT_SP,
-                    getParticipantBadgeTextSizeSp(participant, false)
+            participantBadgeButtons.add(
+                    createParticipantBadgeButton(participant, buttonSize, buttonSpacing)
             );
-            participantButton.setCheckable(false);
-            participantButton.setClickable(true);
-            participantButton.setInsetTop(0);
-            participantButton.setInsetBottom(0);
-            participantButton.setMinWidth(0);
-            participantButton.setMinHeight(0);
-            participantButton.setMinimumWidth(0);
-            participantButton.setMinimumHeight(0);
-            participantButton.setPadding(0, 0, 0, 0);
-            participantButton.setCornerRadius(buttonSize / 2);
-            participantButton.setStrokeWidth(0);
-            participantButton.setBackgroundTintList(ColorStateList.valueOf(participant.color));
-            participantButton.setTextColor(getParticipantTextColor(participant.color));
-            participantButton.setContentDescription(participant.name);
-            participantButton.setOnClickListener(view -> showParticipantDetailsDialog(participant));
-            participantButtonsLayout.addView(participantButton);
         }
+        participantBadgeButtons.add(createAddParticipantBadgeButton(buttonSize, buttonSpacing));
+
+        LinearLayout currentRow = null;
+        for (int index = 0; index < participantBadgeButtons.size(); index++) {
+            if (index % MAX_PARTICIPANT_BUTTONS_PER_ROW == 0) {
+                currentRow = new LinearLayout(this);
+                LinearLayout.LayoutParams rowLayoutParams = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+                if (index > 0) {
+                    rowLayoutParams.topMargin = rowSpacing;
+                }
+                currentRow.setLayoutParams(rowLayoutParams);
+                currentRow.setGravity(Gravity.CENTER_HORIZONTAL);
+                currentRow.setOrientation(LinearLayout.HORIZONTAL);
+                participantButtonsLayout.addView(currentRow);
+            }
+
+            if (currentRow != null) {
+                currentRow.addView(participantBadgeButtons.get(index));
+            }
+        }
+    }
+
+    @NonNull
+    private MaterialButton createParticipantBadgeButton(
+            @NonNull Participant participant,
+            int buttonSize,
+            int buttonSpacing
+    ) {
+        MaterialButton participantButton = new MaterialButton(this);
+        LinearLayout.LayoutParams layoutParams =
+                new LinearLayout.LayoutParams(buttonSize, buttonSize);
+        layoutParams.setMargins(buttonSpacing, 0, buttonSpacing, 0);
+        participantButton.setLayoutParams(layoutParams);
+        participantButton.setText(getParticipantBadgeLabel(participant));
+        participantButton.setAllCaps(false);
+        participantButton.setTextSize(
+                TypedValue.COMPLEX_UNIT_SP,
+                getParticipantBadgeTextSizeSp(participant, false)
+        );
+        participantButton.setCheckable(false);
+        participantButton.setClickable(true);
+        participantButton.setInsetTop(0);
+        participantButton.setInsetBottom(0);
+        participantButton.setMinWidth(0);
+        participantButton.setMinHeight(0);
+        participantButton.setMinimumWidth(0);
+        participantButton.setMinimumHeight(0);
+        participantButton.setPadding(0, 0, 0, 0);
+        participantButton.setCornerRadius(buttonSize / 2);
+        participantButton.setStrokeWidth(0);
+        participantButton.setBackgroundTintList(ColorStateList.valueOf(participant.color));
+        participantButton.setTextColor(getParticipantTextColor(participant.color));
+        participantButton.setContentDescription(participant.name);
+        participantButton.setOnClickListener(view -> showParticipantDetailsDialog(participant));
+        return participantButton;
+    }
+
+    @NonNull
+    private AppCompatImageButton createAddParticipantBadgeButton(int buttonSize, int buttonSpacing) {
+        AppCompatImageButton addParticipantButton = new AppCompatImageButton(this);
+        LinearLayout.LayoutParams addButtonLayoutParams =
+                new LinearLayout.LayoutParams(buttonSize, buttonSize);
+        addButtonLayoutParams.setMargins(buttonSpacing, 0, buttonSpacing, 0);
+        addParticipantButton.setLayoutParams(addButtonLayoutParams);
+        addParticipantButton.setBackgroundColor(Color.TRANSPARENT);
+        addParticipantButton.setImageResource(R.drawable.ic_add_participant_badge);
+        addParticipantButton.setScaleType(ImageView.ScaleType.CENTER);
+        addParticipantButton.setPadding(0, 0, 0, 0);
+        addParticipantButton.setContentDescription(getString(R.string.add_participant));
+        addParticipantButton.setOnClickListener(view -> openAddParticipantDialog());
+        return addParticipantButton;
     }
 
     private void showParticipantDetailsDialog(Participant participant) {
@@ -2134,14 +2245,35 @@ public class NewReceiptActivity extends AppCompatActivity {
         }
 
         participantSelectionLayout.setVisibility(View.VISIBLE);
+        participantSelectionLayout.setOrientation(LinearLayout.VERTICAL);
+        participantSelectionLayout.setGravity(Gravity.END);
         int checkboxSize = dpToPx(36);
         int checkboxSpacing = dpToPx(4);
+        int rowSpacing = dpToPx(4);
 
-        for (Participant participant : participants) {
+        LinearLayout currentRow = null;
+        for (int index = 0; index < participants.size(); index++) {
+            Participant participant = participants.get(index);
+            int indexInRow = index % MAX_ITEM_PARTICIPANT_BUTTONS_PER_ROW;
+            if (indexInRow == 0) {
+                currentRow = new LinearLayout(this);
+                LinearLayout.LayoutParams rowLayoutParams = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+                if (index > 0) {
+                    rowLayoutParams.topMargin = rowSpacing;
+                }
+                currentRow.setLayoutParams(rowLayoutParams);
+                currentRow.setOrientation(LinearLayout.HORIZONTAL);
+                currentRow.setGravity(Gravity.END);
+                participantSelectionLayout.addView(currentRow);
+            }
+
             MaterialButton selectionButton = new MaterialButton(this);
             LinearLayout.LayoutParams layoutParams =
                     new LinearLayout.LayoutParams(checkboxSize, checkboxSize);
-            layoutParams.setMargins(checkboxSpacing, 0, 0, 0);
+            layoutParams.setMargins(indexInRow == 0 ? 0 : checkboxSpacing, 0, 0, 0);
             selectionButton.setLayoutParams(layoutParams);
             selectionButton.setText(getParticipantBadgeLabel(participant));
             selectionButton.setAllCaps(false);
@@ -2175,7 +2307,9 @@ public class NewReceiptActivity extends AppCompatActivity {
                 );
                 updateNextButtonState();
             });
-            participantSelectionLayout.addView(selectionButton);
+            if (currentRow != null) {
+                currentRow.addView(selectionButton);
+            }
         }
     }
 
@@ -2279,7 +2413,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         }
     }
 
-    private Bitmap loadBitmapForCropping(File imageFile) throws IOException {
+    private Bitmap loadBitmapForCropping(File imageFile, float autoRotateDegrees) throws IOException {
         BitmapFactory.Options boundsOptions = new BitmapFactory.Options();
         boundsOptions.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(imageFile.getAbsolutePath(), boundsOptions);
@@ -2296,10 +2430,11 @@ public class NewReceiptActivity extends AppCompatActivity {
             throw new IOException("Bitmap decode failed");
         }
 
-        return rotateBitmapIfNeeded(bitmap, imageFile);
+        return rotateBitmapIfNeeded(bitmap, imageFile, autoRotateDegrees);
     }
 
-    private Bitmap rotateBitmapIfNeeded(Bitmap bitmap, File imageFile) throws IOException {
+    private Bitmap rotateBitmapIfNeeded(Bitmap bitmap, File imageFile, float autoRotateDegrees)
+            throws IOException {
         ExifInterface exifInterface = new ExifInterface(imageFile.getAbsolutePath());
         int orientation = exifInterface.getAttributeInt(
                 ExifInterface.TAG_ORIENTATION,
@@ -2318,7 +2453,15 @@ public class NewReceiptActivity extends AppCompatActivity {
                 matrix.postRotate(270f);
                 break;
             default:
-                return bitmap;
+                break;
+        }
+
+        if (Math.abs(autoRotateDegrees) >= 0.75f) {
+            matrix.postRotate(autoRotateDegrees);
+        }
+
+        if (matrix.isIdentity()) {
+            return bitmap;
         }
 
         Bitmap rotatedBitmap = Bitmap.createBitmap(
