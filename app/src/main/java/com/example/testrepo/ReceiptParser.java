@@ -53,6 +53,10 @@ final class ReceiptParser {
     private static final Pattern LEADING_GROUPED_QUANTITY_PATTERN = Pattern.compile(
             "^\\(\\d+\\)\\s+"
     );
+    private static final Pattern PANT_ROW_PATTERN = Pattern.compile(
+            "^(pant|retur|return|deposit)\\b",
+            Pattern.CASE_INSENSITIVE
+    );
     private static final Pattern SPLIT_QUANTITY_MARKER_PATTERN = Pattern.compile(
             "\\s+\\d+(?:[\\.,]\\d+)?\\s*(?:st|st\\.|stk|x|pack|pkt)\\s*[*x]?",
             Pattern.CASE_INSENSITIVE
@@ -109,13 +113,18 @@ final class ReceiptParser {
                 parsedItems.add(new MutableReceiptItem(
                         parsedRow.name,
                         parsedRow.amountCents,
-                        parsedRow.splitQuantity
+                        parsedRow.splitQuantity,
+                        0
                 ));
                 pendingDescription = null;
             } else if (parsedRow.kind == RowKind.DISCOUNT && !parsedItems.isEmpty()) {
                 MutableReceiptItem previousItem = parsedItems.get(parsedItems.size() - 1);
                 previousItem.amountCents += parsedRow.amountCents;
                 previousItem.appendNameFragment(parsedRow.name);
+                pendingDescription = null;
+            } else if (parsedRow.kind == RowKind.PANT && !parsedItems.isEmpty()) {
+                MutableReceiptItem previousItem = parsedItems.get(parsedItems.size() - 1);
+                previousItem.addPantAmount(parsedRow.amountCents);
                 pendingDescription = null;
             } else {
                 pendingDescription = null;
@@ -127,7 +136,8 @@ final class ReceiptParser {
             result.add(new ReceiptItem(
                     parsedItem.name,
                     parsedItem.amountCents,
-                    parsedItem.splitQuantity
+                    parsedItem.splitQuantity,
+                    parsedItem.pantAmountCents
             ));
         }
         return result;
@@ -160,7 +170,12 @@ final class ReceiptParser {
         if (parsedRow == null || parsedRow.kind != RowKind.ITEM) {
             return null;
         }
-        return new ReceiptItem(parsedRow.name, parsedRow.amountCents, parsedRow.splitQuantity);
+        return new ReceiptItem(
+                parsedRow.name,
+                parsedRow.amountCents,
+                parsedRow.splitQuantity,
+                0
+        );
     }
 
     @Nullable
@@ -201,16 +216,15 @@ final class ReceiptParser {
             }
 
             String splitDisplayName = getCanonicalItemName(item.getName());
-            int absoluteAmountCents = Math.abs(item.getAmountCents());
-            int baseAmountCents = absoluteAmountCents / splitQuantity;
-            int remainderCents = absoluteAmountCents % splitQuantity;
-            int amountSign = item.getAmountCents() < 0 ? -1 : 1;
+            int[] splitBaseAmounts = splitAmountAcrossItems(item.getBaseAmountCents(), splitQuantity);
+            int[] splitPantAmounts = splitAmountAcrossItems(item.getPantAmountCents(), splitQuantity);
 
             for (int index = 0; index < splitQuantity; index++) {
-                int splitAmountCents = baseAmountCents + (index < remainderCents ? 1 : 0);
                 ReceiptItem splitItem = new ReceiptItem(
                         splitDisplayName,
-                        splitAmountCents * amountSign
+                        splitBaseAmounts[index] + splitPantAmounts[index],
+                        1,
+                        splitPantAmounts[index]
                 );
                 splitItem.selectParticipants(item.copySelectedParticipantKeys());
                 expandedItems.add(splitItem);
@@ -254,6 +268,10 @@ final class ReceiptParser {
         String itemName = extractDisplayName(leftSide);
         if (!looksLikeItemName(itemName)) {
             return null;
+        }
+
+        if (looksLikePantRow(itemName)) {
+            return new ParsedRow(RowKind.PANT, itemName, amountCents, 1);
         }
 
         return new ParsedRow(RowKind.ITEM, itemName, amountCents, extractSplitQuantity(leftSide));
@@ -466,6 +484,10 @@ final class ReceiptParser {
         return true;
     }
 
+    private boolean looksLikePantRow(String itemName) {
+        return PANT_ROW_PATTERN.matcher(cleanText(itemName)).find();
+    }
+
     private boolean looksLikePendingDescription(String row) {
         if (row.isEmpty() || hasTerminalPrice(row) || looksLikeDiscountRow(row)) {
             return false;
@@ -537,6 +559,35 @@ final class ReceiptParser {
         return amountCents < 0 ? "-" + formatted : formatted;
     }
 
+    @NonNull
+    private static String formatPantAmount(int amountCents) {
+        int absolute = Math.abs(amountCents);
+        int whole = absolute / 100;
+        int fraction = absolute % 100;
+        if (fraction == 0) {
+            return String.format(Locale.US, "%d", whole);
+        }
+        return String.format(Locale.US, "%d,%02d", whole, fraction);
+    }
+
+    @NonNull
+    private static int[] splitAmountAcrossItems(int amountCents, int splitQuantity) {
+        int[] splitAmounts = new int[Math.max(1, splitQuantity)];
+        if (splitQuantity <= 0) {
+            return splitAmounts;
+        }
+
+        int sign = amountCents < 0 ? -1 : 1;
+        int absoluteAmount = Math.abs(amountCents);
+        int baseAmount = absoluteAmount / splitQuantity;
+        int remainder = absoluteAmount % splitQuantity;
+
+        for (int index = 0; index < splitQuantity; index++) {
+            splitAmounts[index] = (baseAmount + (index < remainder ? 1 : 0)) * sign;
+        }
+        return splitAmounts;
+    }
+
     @Nullable
     private static Integer parseDiscreteQuantityCount(String rawQuantity) {
         String cleaned = normalizeWhitespace(rawQuantity).replace(',', '.');
@@ -589,7 +640,8 @@ final class ReceiptParser {
 
     private enum RowKind {
         ITEM,
-        DISCOUNT
+        DISCOUNT,
+        PANT
     }
 
     private static final class ParsedRow {
@@ -610,11 +662,18 @@ final class ReceiptParser {
         private String name;
         private int amountCents;
         private final int splitQuantity;
+        private int pantAmountCents;
 
-        private MutableReceiptItem(String name, int amountCents, int splitQuantity) {
+        private MutableReceiptItem(
+                String name,
+                int amountCents,
+                int splitQuantity,
+                int pantAmountCents
+        ) {
             this.name = name;
             this.amountCents = amountCents;
             this.splitQuantity = splitQuantity;
+            this.pantAmountCents = pantAmountCents;
         }
 
         private void appendNameFragment(String fragment) {
@@ -631,22 +690,33 @@ final class ReceiptParser {
 
             name = normalizeWhitespace(name + " " + normalizedFragment);
         }
+
+        private void addPantAmount(int pantAmountCents) {
+            this.amountCents += pantAmountCents;
+            this.pantAmountCents += pantAmountCents;
+        }
     }
 
     static final class ReceiptItem {
         private String name;
         private int amountCents;
         private final int splitQuantity;
+        private final int pantAmountCents;
         private final Set<String> selectedParticipantKeys = new HashSet<>();
 
         ReceiptItem(String name, int amountCents) {
-            this(name, amountCents, 1);
+            this(name, amountCents, 1, 0);
         }
 
         ReceiptItem(String name, int amountCents, int splitQuantity) {
+            this(name, amountCents, splitQuantity, 0);
+        }
+
+        ReceiptItem(String name, int amountCents, int splitQuantity, int pantAmountCents) {
             this.name = name;
             this.amountCents = amountCents;
             this.splitQuantity = Math.max(1, splitQuantity);
+            this.pantAmountCents = pantAmountCents;
         }
 
         @NonNull
@@ -663,6 +733,16 @@ final class ReceiptParser {
             return formatCents(amountCents);
         }
 
+        @NonNull
+        String getDisplayPrice() {
+            if (pantAmountCents == 0) {
+                return getPrice();
+            }
+
+            String separator = pantAmountCents > 0 ? " + " : " - ";
+            return formatCents(getBaseAmountCents()) + separator + formatPantAmount(pantAmountCents);
+        }
+
         int getAmountCents() {
             return amountCents;
         }
@@ -673,6 +753,14 @@ final class ReceiptParser {
 
         int getSplitQuantity() {
             return splitQuantity;
+        }
+
+        int getPantAmountCents() {
+            return pantAmountCents;
+        }
+
+        int getBaseAmountCents() {
+            return amountCents - pantAmountCents;
         }
 
         boolean isParticipantSelected(String participantKey) {
@@ -706,7 +794,7 @@ final class ReceiptParser {
 
         @NonNull
         ReceiptItem copy() {
-            ReceiptItem copy = new ReceiptItem(name, amountCents, splitQuantity);
+            ReceiptItem copy = new ReceiptItem(name, amountCents, splitQuantity, pantAmountCents);
             copy.selectParticipants(selectedParticipantKeys);
             return copy;
         }

@@ -35,6 +35,28 @@ public class ReceiptParserTest {
     }
 
     @Test
+    public void mergesPantIntoPreviousItemDisplay() {
+        ArrayList<String> rows = new ArrayList<>(Arrays.asList(
+                "Red Bull 13,95",
+                "Pant 1,00 1 1,00"
+        ));
+
+        ArrayList<ReceiptParser.ReceiptItem> items = parser.extractReceiptItems(rows);
+
+        assertEquals(1, items.size());
+        assertEquals("Red Bull", items.get(0).getName());
+        assertEquals("14,95", items.get(0).getPrice());
+        assertEquals("13,95 + 1", items.get(0).getDisplayPrice());
+    }
+
+    @Test
+    public void doesNotTreatPantAsStandaloneReceiptItem() {
+        ReceiptParser.ReceiptItem item = parser.parseReceiptItem("Pant 1,00 1 1,00");
+
+        assertNull(item);
+    }
+
+    @Test
     public void parsesTabularRowsFromSharedPdfReceipts() {
         ReceiptParser.ReceiptItem item = parser.parseReceiptItem(
                 "Avfallsp\u00e5se dragsn 2099950 20,90 2,00 st 41,80"

@@ -1337,7 +1337,8 @@ public class NewReceiptActivity extends AppCompatActivity {
                         new ReceiptParser.ReceiptItem(
                                 itemName,
                                 item.getAmountCents(),
-                                item.getSplitQuantity()
+                                item.getSplitQuantity(),
+                                item.getPantAmountCents()
                         )
                 );
                 continue;
@@ -1348,7 +1349,8 @@ public class NewReceiptActivity extends AppCompatActivity {
                     new ReceiptParser.ReceiptItem(
                             itemName,
                             groupedItem.getAmountCents() + item.getAmountCents(),
-                            groupedItem.getSplitQuantity() + item.getSplitQuantity()
+                            groupedItem.getSplitQuantity() + item.getSplitQuantity(),
+                            groupedItem.getPantAmountCents() + item.getPantAmountCents()
                     )
             );
         }
@@ -1358,7 +1360,8 @@ public class NewReceiptActivity extends AppCompatActivity {
             displayItems.add(new ReceiptParser.ReceiptItem(
                     receiptParser.getGroupedDisplayName(groupedItem),
                     groupedItem.getAmountCents(),
-                    groupedItem.getSplitQuantity()
+                    groupedItem.getSplitQuantity(),
+                    groupedItem.getPantAmountCents()
             ));
         }
         return displayItems;
@@ -2925,7 +2928,7 @@ public class NewReceiptActivity extends AppCompatActivity {
 
             if (item != null) {
                 itemNameView.setText(item.getName());
-                itemPriceView.setText(item.getPrice());
+                itemPriceView.setText(item.getDisplayPrice());
                 bindParticipantSelectionButtons(participantSelectionLayout, item);
             } else {
                 participantSelectionLayout.removeAllViews();
