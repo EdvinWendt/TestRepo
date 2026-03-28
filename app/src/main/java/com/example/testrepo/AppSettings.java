@@ -4,11 +4,26 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 
 public final class AppSettings {
     private static final String PREFERENCES_NAME = "app_settings";
     private static final String KEY_AUTO_ROTATE_IMAGE = "auto_rotate_image";
+    private static final String KEY_SPLIT_ITEMS = "split_items";
+    private static final String KEY_PRE_ADDED_PARTICIPANTS = "pre_added_participants";
     private static final boolean DEFAULT_AUTO_ROTATE_IMAGE_ENABLED = true;
+    private static final boolean DEFAULT_SPLIT_ITEMS_ENABLED = false;
+    private static final String JSON_KEY_NAME = "name";
+    private static final String JSON_KEY_PHONE = "phone";
 
     private AppSettings() {
     }
@@ -25,8 +40,154 @@ public final class AppSettings {
                 .apply();
     }
 
+    public static boolean isSplitItemsEnabled(@NonNull Context context) {
+        return getPreferences(context)
+                .getBoolean(KEY_SPLIT_ITEMS, DEFAULT_SPLIT_ITEMS_ENABLED);
+    }
+
+    public static void setSplitItemsEnabled(@NonNull Context context, boolean enabled) {
+        getPreferences(context)
+                .edit()
+                .putBoolean(KEY_SPLIT_ITEMS, enabled)
+                .apply();
+    }
+
+    @NonNull
+    public static ArrayList<PreAddedParticipant> getPreAddedParticipants(@NonNull Context context) {
+        String serializedParticipants =
+                getPreferences(context).getString(KEY_PRE_ADDED_PARTICIPANTS, "[]");
+        ArrayList<PreAddedParticipant> participants = new ArrayList<>();
+        Set<String> seenKeys = new HashSet<>();
+
+        try {
+            JSONArray participantsArray = new JSONArray(serializedParticipants);
+            for (int index = 0; index < participantsArray.length(); index++) {
+                JSONObject participantObject = participantsArray.optJSONObject(index);
+                if (participantObject == null) {
+                    continue;
+                }
+
+                String name = normalizeWhitespace(participantObject.optString(JSON_KEY_NAME, ""));
+                String phoneNumber = normalizeWhitespace(
+                        participantObject.optString(JSON_KEY_PHONE, "")
+                );
+                if (name.isEmpty() || phoneNumber.isEmpty()) {
+                    continue;
+                }
+
+                PreAddedParticipant participant = new PreAddedParticipant(name, phoneNumber);
+                if (seenKeys.add(participant.getStorageKey())) {
+                    participants.add(participant);
+                }
+            }
+        } catch (JSONException ignored) {
+            // Fall back to an empty list if stored data is malformed.
+        }
+
+        return participants;
+    }
+
+    public static void addPreAddedParticipant(
+            @NonNull Context context,
+            @NonNull PreAddedParticipant participant
+    ) {
+        ArrayList<PreAddedParticipant> participants = getPreAddedParticipants(context);
+        for (PreAddedParticipant existingParticipant : participants) {
+            if (existingParticipant.getStorageKey().equals(participant.getStorageKey())) {
+                return;
+            }
+        }
+
+        participants.add(participant);
+        setPreAddedParticipants(context, participants);
+    }
+
+    public static void removePreAddedParticipant(
+            @NonNull Context context,
+            @NonNull PreAddedParticipant participant
+    ) {
+        ArrayList<PreAddedParticipant> participants = getPreAddedParticipants(context);
+        String storageKey = participant.getStorageKey();
+        participants.removeIf(existingParticipant -> existingParticipant.getStorageKey().equals(storageKey));
+        setPreAddedParticipants(context, participants);
+    }
+
+    public static boolean isPreAddedParticipantsPreferenceKey(@Nullable String key) {
+        return KEY_PRE_ADDED_PARTICIPANTS.equals(key);
+    }
+
+    public static void registerChangeListener(
+            @NonNull Context context,
+            @NonNull SharedPreferences.OnSharedPreferenceChangeListener listener
+    ) {
+        getPreferences(context).registerOnSharedPreferenceChangeListener(listener);
+    }
+
+    public static void unregisterChangeListener(
+            @NonNull Context context,
+            @NonNull SharedPreferences.OnSharedPreferenceChangeListener listener
+    ) {
+        getPreferences(context).unregisterOnSharedPreferenceChangeListener(listener);
+    }
+
+    public static boolean isSplitItemsPreferenceKey(@Nullable String key) {
+        return KEY_SPLIT_ITEMS.equals(key);
+    }
+
+    private static void setPreAddedParticipants(
+            @NonNull Context context,
+            @NonNull ArrayList<PreAddedParticipant> participants
+    ) {
+        JSONArray participantsArray = new JSONArray();
+        for (PreAddedParticipant participant : participants) {
+            JSONObject participantObject = new JSONObject();
+            try {
+                participantObject.put(JSON_KEY_NAME, participant.name);
+                participantObject.put(JSON_KEY_PHONE, participant.phoneNumber);
+                participantsArray.put(participantObject);
+            } catch (JSONException ignored) {
+                // Skip malformed participant entries.
+            }
+        }
+
+        getPreferences(context)
+                .edit()
+                .putString(KEY_PRE_ADDED_PARTICIPANTS, participantsArray.toString())
+                .apply();
+    }
+
+    @NonNull
+    private static String normalizeWhitespace(@Nullable String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim().replaceAll("\\s+", " ");
+    }
+
+    @NonNull
+    private static String normalizePhoneNumber(@Nullable String phoneNumber) {
+        return normalizeWhitespace(phoneNumber).replaceAll("[^+\\d]", "");
+    }
+
     @NonNull
     private static SharedPreferences getPreferences(@NonNull Context context) {
         return context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
+    }
+
+    public static final class PreAddedParticipant {
+        @NonNull
+        public final String name;
+        @NonNull
+        public final String phoneNumber;
+
+        public PreAddedParticipant(@NonNull String name, @NonNull String phoneNumber) {
+            this.name = normalizeWhitespace(name);
+            this.phoneNumber = normalizeWhitespace(phoneNumber);
+        }
+
+        @NonNull
+        String getStorageKey() {
+            return name.toLowerCase(Locale.US) + "\u001F" + normalizePhoneNumber(phoneNumber);
+        }
     }
 }

@@ -43,12 +43,23 @@ public class SettingsDialogFragment extends DialogFragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         View closeButton = view.findViewById(R.id.button_close_settings);
+        View managePreAddedParticipantsButton =
+                view.findViewById(R.id.button_manage_pre_added_participants);
         MaterialSwitch autoRotateSwitch = view.findViewById(R.id.switch_auto_rotate_image);
+        MaterialSwitch splitItemsSwitch = view.findViewById(R.id.switch_split_items);
         closeButton.setOnClickListener(buttonView -> dismiss());
+        managePreAddedParticipantsButton.setOnClickListener(buttonView ->
+                PreAddedParticipantsDialogFragment.show(getParentFragmentManager())
+        );
         autoRotateSwitch.setChecked(AppSettings.isAutoRotateImageEnabled(requireContext()));
         autoRotateSwitch.setOnCheckedChangeListener(
                 (buttonView, isChecked) ->
                         AppSettings.setAutoRotateImageEnabled(requireContext(), isChecked)
+        );
+        splitItemsSwitch.setChecked(AppSettings.isSplitItemsEnabled(requireContext()));
+        splitItemsSwitch.setOnCheckedChangeListener(
+                (buttonView, isChecked) ->
+                        AppSettings.setSplitItemsEnabled(requireContext(), isChecked)
         );
     }
 

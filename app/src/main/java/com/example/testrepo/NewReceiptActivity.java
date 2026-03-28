@@ -3,6 +3,7 @@ package com.example.testrepo;
 import android.Manifest;
 import android.content.ClipData;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -92,6 +93,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
@@ -128,6 +130,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     private ExecutorService backgroundExecutor;
     private final ReceiptParser receiptParser = new ReceiptParser();
     private final ArrayList<ReceiptParser.ReceiptItem> receiptItems = new ArrayList<>();
+    private final ArrayList<ReceiptParser.ReceiptItem> trackedReceiptItems = new ArrayList<>();
     private final ArrayList<Participant> participants = new ArrayList<>();
     private ReceiptItemsAdapter receiptItemsAdapter;
     private boolean participantControlsVisible;
@@ -139,6 +142,12 @@ public class NewReceiptActivity extends AppCompatActivity {
     private Intent lastSharedReceiptIntent;
     @Nullable
     private File lastRefreshableReceiptImageFile;
+    private final SharedPreferences.OnSharedPreferenceChangeListener settingsChangeListener =
+            (sharedPreferences, key) -> {
+                if (AppSettings.isSplitItemsPreferenceKey(key) && !trackedReceiptItems.isEmpty()) {
+                    reapplyTrackedReceiptItems();
+                }
+            };
 
     private final ActivityResultLauncher<String> requestCameraPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
@@ -207,6 +216,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         });
         configureReceiptTitleInput();
         ensureDefaultParticipant();
+        applyPreAddedParticipants();
         refreshParticipantButtons();
         setParticipantControlsVisible(false);
         updateReceiptTotal();
@@ -245,6 +255,18 @@ public class NewReceiptActivity extends AppCompatActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         handleSharedReceiptIntent(intent);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        AppSettings.registerChangeListener(this, settingsChangeListener);
+    }
+
+    @Override
+    protected void onStop() {
+        AppSettings.unregisterChangeListener(this, settingsChangeListener);
+        super.onStop();
     }
 
     private void startCaptureFlow() {
@@ -1286,12 +1308,121 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     private void showReceiptResults(ArrayList<ReceiptParser.ReceiptItem> detectedItems) {
-        receiptItems.clear();
-        receiptItems.addAll(detectedItems);
-        applyDefaultParticipantSelections();
-        refreshReceiptItems();
-
+        trackedReceiptItems.clear();
+        trackedReceiptItems.addAll(cloneReceiptItems(detectedItems));
+        reapplyTrackedReceiptItems();
         showReceiptResultsUi();
+    }
+
+    @NonNull
+    private ArrayList<ReceiptParser.ReceiptItem> prepareReceiptItemsForDisplay(
+            @NonNull ArrayList<ReceiptParser.ReceiptItem> detectedItems
+    ) {
+        if (AppSettings.isSplitItemsEnabled(this)) {
+            return receiptParser.expandDiscreteQuantityItems(detectedItems);
+        }
+
+        LinkedHashMap<String, ReceiptParser.ReceiptItem> groupedItems = new LinkedHashMap<>();
+        for (ReceiptParser.ReceiptItem item : detectedItems) {
+            String itemName = normalizeWhitespace(receiptParser.getCanonicalItemName(item.getName()));
+            if (itemName.isEmpty()) {
+                itemName = item.getName().trim();
+            }
+
+            String groupingKey = itemName.toLowerCase(Locale.US);
+            ReceiptParser.ReceiptItem groupedItem = groupedItems.get(groupingKey);
+            if (groupedItem == null) {
+                groupedItems.put(
+                        groupingKey,
+                        new ReceiptParser.ReceiptItem(
+                                itemName,
+                                item.getAmountCents(),
+                                item.getSplitQuantity()
+                        )
+                );
+                continue;
+            }
+
+            groupedItems.put(
+                    groupingKey,
+                    new ReceiptParser.ReceiptItem(
+                            itemName,
+                            groupedItem.getAmountCents() + item.getAmountCents(),
+                            groupedItem.getSplitQuantity() + item.getSplitQuantity()
+                    )
+            );
+        }
+
+        ArrayList<ReceiptParser.ReceiptItem> displayItems = new ArrayList<>(groupedItems.size());
+        for (ReceiptParser.ReceiptItem groupedItem : groupedItems.values()) {
+            displayItems.add(new ReceiptParser.ReceiptItem(
+                    receiptParser.getGroupedDisplayName(groupedItem),
+                    groupedItem.getAmountCents(),
+                    groupedItem.getSplitQuantity()
+            ));
+        }
+        return displayItems;
+    }
+
+    private void reapplyTrackedReceiptItems() {
+        ArrayList<ReceiptParser.ReceiptItem> currentItems = cloneReceiptItems(receiptItems);
+        ArrayList<ReceiptParser.ReceiptItem> displayItems =
+                prepareReceiptItemsForDisplay(cloneReceiptItems(trackedReceiptItems));
+
+        if (currentItems.isEmpty()) {
+            for (ReceiptParser.ReceiptItem item : displayItems) {
+                selectAllParticipantsForItem(item);
+            }
+        } else {
+            copyParticipantSelections(currentItems, displayItems);
+        }
+
+        receiptItems.clear();
+        receiptItems.addAll(displayItems);
+        refreshReceiptItems();
+    }
+
+    @NonNull
+    private ArrayList<ReceiptParser.ReceiptItem> cloneReceiptItems(
+            @NonNull ArrayList<ReceiptParser.ReceiptItem> sourceItems
+    ) {
+        ArrayList<ReceiptParser.ReceiptItem> clonedItems = new ArrayList<>(sourceItems.size());
+        for (ReceiptParser.ReceiptItem sourceItem : sourceItems) {
+            clonedItems.add(sourceItem.copy());
+        }
+        return clonedItems;
+    }
+
+    private void copyParticipantSelections(
+            @NonNull ArrayList<ReceiptParser.ReceiptItem> sourceItems,
+            @NonNull ArrayList<ReceiptParser.ReceiptItem> targetItems
+    ) {
+        LinkedHashMap<String, LinkedHashSet<String>> selectedParticipantsByItemKey =
+                new LinkedHashMap<>();
+
+        for (ReceiptParser.ReceiptItem sourceItem : sourceItems) {
+            String itemKey = getReceiptItemGroupingKey(sourceItem.getName());
+            LinkedHashSet<String> selectedParticipants = selectedParticipantsByItemKey.get(itemKey);
+            if (selectedParticipants == null) {
+                selectedParticipants = new LinkedHashSet<>();
+                selectedParticipantsByItemKey.put(itemKey, selectedParticipants);
+            }
+            selectedParticipants.addAll(sourceItem.copySelectedParticipantKeys());
+        }
+
+        for (ReceiptParser.ReceiptItem targetItem : targetItems) {
+            Set<String> selectedParticipants =
+                    selectedParticipantsByItemKey.get(getReceiptItemGroupingKey(targetItem.getName()));
+            if (selectedParticipants != null) {
+                targetItem.selectParticipants(selectedParticipants);
+            }
+        }
+    }
+
+    @NonNull
+    private String getReceiptItemGroupingKey(@NonNull String itemName) {
+        return normalizeWhitespace(receiptParser.getCanonicalItemName(itemName))
+                .toLowerCase(Locale.US);
     }
 
     private void showReceiptResultsUi() {
@@ -1305,6 +1436,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     private void clearCurrentReceiptResults() {
+        trackedReceiptItems.clear();
         receiptItems.clear();
         refreshReceiptItems();
         receiptResultsLayout.setVisibility(View.GONE);
@@ -1382,6 +1514,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         dialog.setOnShowListener(dialogInterface -> {
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(view -> {
                 receiptItems.remove(item);
+                syncTrackedReceiptItemsToCurrentItems();
                 refreshReceiptItems();
                 dialog.dismiss();
             });
@@ -1411,6 +1544,7 @@ public class NewReceiptActivity extends AppCompatActivity {
 
                 item.setName(itemName);
                 item.setAmountCents(updatedAmountCents);
+                syncTrackedReceiptItemsToCurrentItems();
                 refreshReceiptItems();
                 dialog.dismiss();
             });
@@ -1477,8 +1611,18 @@ public class NewReceiptActivity extends AppCompatActivity {
         ReceiptParser.ReceiptItem item = new ReceiptParser.ReceiptItem(itemName, amountCents);
         selectAllParticipantsForItem(item);
         receiptItems.add(item);
+        syncTrackedReceiptItemsToCurrentItems();
         refreshReceiptItems();
         showReceiptResultsUi();
+    }
+
+    private void syncTrackedReceiptItemsToCurrentItems() {
+        trackedReceiptItems.clear();
+        for (ReceiptParser.ReceiptItem item : receiptItems) {
+            ReceiptParser.ReceiptItem trackedItem = item.copy();
+            trackedItem.setName(receiptParser.getCanonicalItemName(trackedItem.getName()));
+            trackedReceiptItems.add(trackedItem);
+        }
     }
 
     private void applyDialogAnimations(@NonNull AlertDialog dialog) {
@@ -1677,6 +1821,23 @@ public class NewReceiptActivity extends AppCompatActivity {
                 getParticipantInitials(DEFAULT_PARTICIPANT_NAME),
                 createParticipantColor(participants.size())
         ));
+    }
+
+    private void applyPreAddedParticipants() {
+        for (AppSettings.PreAddedParticipant preAddedParticipant
+                : AppSettings.getPreAddedParticipants(this)) {
+            if (isParticipantAlreadyAdded(preAddedParticipant.name, preAddedParticipant.phoneNumber)) {
+                continue;
+            }
+
+            participants.add(new Participant(
+                    preAddedParticipant.name,
+                    preAddedParticipant.phoneNumber,
+                    buildParticipantKey(preAddedParticipant.name, preAddedParticipant.phoneNumber),
+                    getParticipantInitials(preAddedParticipant.name),
+                    createParticipantColor(participants.size())
+            ));
+        }
     }
 
     private void refreshDefaultParticipantPhoneNumber() {

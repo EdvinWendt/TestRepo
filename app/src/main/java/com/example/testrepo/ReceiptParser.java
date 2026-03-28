@@ -34,12 +34,28 @@ final class ReceiptParser {
             "^(.*?)\\s+\\d+(?:[\\.,]\\d+)?\\s*(?:st|st\\.|stk|x|pack|pkt|kg|hg|g|mg|l|cl|dl|ml)$",
             Pattern.CASE_INSENSITIVE
     );
+    private static final Pattern TRAILING_DISCRETE_QUANTITY_PATTERN = Pattern.compile(
+            ".*?\\s+([-+]?\\d+(?:[\\.,]\\d+)?)\\s*(st|st\\.|stk|x|pack|pkt)\\s*$",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern INLINE_DISCRETE_QUANTITY_PATTERN = Pattern.compile(
+            "^(.*?)\\s+(\\d+(?:[\\.,]\\d+)?)\\s*(st|st\\.|stk|x|pack|pkt)\\s*[*x]\\s*"
+                    + "[-+]?\\d+(?:[\\.,]\\d{2})?\\s*(?:kr|sek)?$",
+            Pattern.CASE_INSENSITIVE
+    );
     private static final Pattern PROMOTION_MARKER_PATTERN = Pattern.compile(
             "\\b\\d+\\s*f\\s*\\d+(?:[\\.,]\\d{2})?\\s*(?:kr|sek)?\\b",
             Pattern.CASE_INSENSITIVE
     );
     private static final Pattern TRAILING_SHORT_MARKER_PATTERN = Pattern.compile(
             "[,\\s]+\\p{L}{1,2}$"
+    );
+    private static final Pattern LEADING_GROUPED_QUANTITY_PATTERN = Pattern.compile(
+            "^\\(\\d+\\)\\s+"
+    );
+    private static final Pattern SPLIT_QUANTITY_MARKER_PATTERN = Pattern.compile(
+            "\\s+\\d+(?:[\\.,]\\d+)?\\s*(?:st|st\\.|stk|x|pack|pkt)\\s*[*x]?",
+            Pattern.CASE_INSENSITIVE
     );
     private static final Pattern LEADING_MARKERS_PATTERN = Pattern.compile("^[*+~#]+\\s*");
     private static final Pattern TRAILING_PUNCTUATION_PATTERN = Pattern.compile("[\\s:;,.]+$");
@@ -90,7 +106,11 @@ final class ReceiptParser {
             }
 
             if (parsedRow.kind == RowKind.ITEM) {
-                parsedItems.add(new MutableReceiptItem(parsedRow.name, parsedRow.amountCents));
+                parsedItems.add(new MutableReceiptItem(
+                        parsedRow.name,
+                        parsedRow.amountCents,
+                        parsedRow.splitQuantity
+                ));
                 pendingDescription = null;
             } else if (parsedRow.kind == RowKind.DISCOUNT && !parsedItems.isEmpty()) {
                 MutableReceiptItem previousItem = parsedItems.get(parsedItems.size() - 1);
@@ -104,7 +124,11 @@ final class ReceiptParser {
 
         ArrayList<ReceiptItem> result = new ArrayList<>();
         for (MutableReceiptItem parsedItem : parsedItems) {
-            result.add(new ReceiptItem(parsedItem.name, parsedItem.amountCents));
+            result.add(new ReceiptItem(
+                    parsedItem.name,
+                    parsedItem.amountCents,
+                    parsedItem.splitQuantity
+            ));
         }
         return result;
     }
@@ -136,7 +160,7 @@ final class ReceiptParser {
         if (parsedRow == null || parsedRow.kind != RowKind.ITEM) {
             return null;
         }
-        return new ReceiptItem(parsedRow.name, parsedRow.amountCents);
+        return new ReceiptItem(parsedRow.name, parsedRow.amountCents, parsedRow.splitQuantity);
     }
 
     @Nullable
@@ -147,6 +171,52 @@ final class ReceiptParser {
     @NonNull
     String formatAmount(int amountCents) {
         return formatCents(amountCents);
+    }
+
+    @NonNull
+    String getCanonicalItemName(@NonNull String itemName) {
+        String cleanedName = normalizeWhitespace(itemName);
+        cleanedName = LEADING_GROUPED_QUANTITY_PATTERN.matcher(cleanedName).replaceFirst("");
+        String splitDisplayName = getSplitDisplayName(cleanedName);
+        return normalizeWhitespace(splitDisplayName.isEmpty() ? cleanedName : splitDisplayName);
+    }
+
+    @NonNull
+    String getGroupedDisplayName(@NonNull ReceiptItem item) {
+        String canonicalName = getCanonicalItemName(item.getName());
+        if (item.getSplitQuantity() <= 1) {
+            return canonicalName;
+        }
+        return "(" + item.getSplitQuantity() + ") " + canonicalName;
+    }
+
+    @NonNull
+    ArrayList<ReceiptItem> expandDiscreteQuantityItems(@NonNull List<ReceiptItem> items) {
+        ArrayList<ReceiptItem> expandedItems = new ArrayList<>();
+        for (ReceiptItem item : items) {
+            int splitQuantity = item.getSplitQuantity();
+            if (splitQuantity <= 1) {
+                expandedItems.add(item.copy());
+                continue;
+            }
+
+            String splitDisplayName = getCanonicalItemName(item.getName());
+            int absoluteAmountCents = Math.abs(item.getAmountCents());
+            int baseAmountCents = absoluteAmountCents / splitQuantity;
+            int remainderCents = absoluteAmountCents % splitQuantity;
+            int amountSign = item.getAmountCents() < 0 ? -1 : 1;
+
+            for (int index = 0; index < splitQuantity; index++) {
+                int splitAmountCents = baseAmountCents + (index < remainderCents ? 1 : 0);
+                ReceiptItem splitItem = new ReceiptItem(
+                        splitDisplayName,
+                        splitAmountCents * amountSign
+                );
+                splitItem.selectParticipants(item.copySelectedParticipantKeys());
+                expandedItems.add(splitItem);
+            }
+        }
+        return expandedItems;
     }
 
     @Nullable
@@ -173,7 +243,12 @@ final class ReceiptParser {
         }
 
         if (shouldTreatAsDiscountRow(leftSide, amountCents)) {
-            return new ParsedRow(RowKind.DISCOUNT, extractDiscountNameFragment(leftSide), amountCents);
+            return new ParsedRow(
+                    RowKind.DISCOUNT,
+                    extractDiscountNameFragment(leftSide),
+                    amountCents,
+                    1
+            );
         }
 
         String itemName = extractDisplayName(leftSide);
@@ -181,7 +256,7 @@ final class ReceiptParser {
             return null;
         }
 
-        return new ParsedRow(RowKind.ITEM, itemName, amountCents);
+        return new ParsedRow(RowKind.ITEM, itemName, amountCents, extractSplitQuantity(leftSide));
     }
 
     private boolean hasTerminalPrice(String row) {
@@ -297,6 +372,38 @@ final class ReceiptParser {
     private boolean looksLikeTabularItemRow(String leftSide) {
         String stripped = stripTrailingTableColumns(cleanText(leftSide));
         return !stripped.equals(cleanText(leftSide));
+    }
+
+    private int extractSplitQuantity(String leftSide) {
+        Integer trailingQuantity = extractTrailingDiscreteQuantity(leftSide);
+        if (trailingQuantity != null) {
+            return trailingQuantity;
+        }
+
+        Integer inlineQuantity = extractInlineDiscreteQuantity(leftSide);
+        if (inlineQuantity != null) {
+            return inlineQuantity;
+        }
+
+        return 1;
+    }
+
+    @Nullable
+    private Integer extractTrailingDiscreteQuantity(String leftSide) {
+        Matcher matcher = TRAILING_DISCRETE_QUANTITY_PATTERN.matcher(leftSide);
+        if (!matcher.matches()) {
+            return null;
+        }
+        return parseDiscreteQuantityCount(matcher.group(1));
+    }
+
+    @Nullable
+    private Integer extractInlineDiscreteQuantity(String leftSide) {
+        Matcher matcher = INLINE_DISCRETE_QUANTITY_PATTERN.matcher(leftSide);
+        if (!matcher.matches()) {
+            return null;
+        }
+        return parseDiscreteQuantityCount(matcher.group(2));
     }
 
     private String stripTrailingTableColumns(String value) {
@@ -430,11 +537,50 @@ final class ReceiptParser {
         return amountCents < 0 ? "-" + formatted : formatted;
     }
 
+    @Nullable
+    private static Integer parseDiscreteQuantityCount(String rawQuantity) {
+        String cleaned = normalizeWhitespace(rawQuantity).replace(',', '.');
+        if (cleaned.isEmpty()) {
+            return null;
+        }
+
+        String[] parts = cleaned.split("\\.");
+        if (parts.length == 0 || parts.length > 2) {
+            return null;
+        }
+
+        int wholeCount;
+        try {
+            wholeCount = Integer.parseInt(parts[0]);
+        } catch (NumberFormatException exception) {
+            return null;
+        }
+
+        if (wholeCount <= 1) {
+            return null;
+        }
+
+        if (parts.length == 2 && !parts[1].matches("0+")) {
+            return null;
+        }
+
+        return wholeCount;
+    }
+
     private static String cleanText(String value) {
         String cleaned = normalizeWhitespace(value);
         cleaned = LEADING_MARKERS_PATTERN.matcher(cleaned).replaceFirst("");
         cleaned = TRAILING_PUNCTUATION_PATTERN.matcher(cleaned).replaceFirst("");
         return normalizeWhitespace(cleaned);
+    }
+
+    @NonNull
+    private static String getSplitDisplayName(String itemName) {
+        String cleanedName = normalizeWhitespace(itemName);
+        String strippedName = SPLIT_QUANTITY_MARKER_PATTERN.matcher(cleanedName)
+                .replaceFirst("");
+        strippedName = cleanText(strippedName);
+        return strippedName.isEmpty() ? cleanedName : strippedName;
     }
 
     private static String normalizeWhitespace(String value) {
@@ -450,21 +596,25 @@ final class ReceiptParser {
         private final RowKind kind;
         private String name;
         private final int amountCents;
+        private final int splitQuantity;
 
-        private ParsedRow(RowKind kind, String name, int amountCents) {
+        private ParsedRow(RowKind kind, String name, int amountCents, int splitQuantity) {
             this.kind = kind;
             this.name = name;
             this.amountCents = amountCents;
+            this.splitQuantity = splitQuantity;
         }
     }
 
     private static final class MutableReceiptItem {
         private String name;
         private int amountCents;
+        private final int splitQuantity;
 
-        private MutableReceiptItem(String name, int amountCents) {
+        private MutableReceiptItem(String name, int amountCents, int splitQuantity) {
             this.name = name;
             this.amountCents = amountCents;
+            this.splitQuantity = splitQuantity;
         }
 
         private void appendNameFragment(String fragment) {
@@ -486,11 +636,17 @@ final class ReceiptParser {
     static final class ReceiptItem {
         private String name;
         private int amountCents;
+        private final int splitQuantity;
         private final Set<String> selectedParticipantKeys = new HashSet<>();
 
         ReceiptItem(String name, int amountCents) {
+            this(name, amountCents, 1);
+        }
+
+        ReceiptItem(String name, int amountCents, int splitQuantity) {
             this.name = name;
             this.amountCents = amountCents;
+            this.splitQuantity = Math.max(1, splitQuantity);
         }
 
         @NonNull
@@ -515,6 +671,10 @@ final class ReceiptParser {
             this.amountCents = amountCents;
         }
 
+        int getSplitQuantity() {
+            return splitQuantity;
+        }
+
         boolean isParticipantSelected(String participantKey) {
             return selectedParticipantKeys.contains(participantKey);
         }
@@ -533,6 +693,22 @@ final class ReceiptParser {
             } else {
                 selectedParticipantKeys.add(participantKey);
             }
+        }
+
+        @NonNull
+        Set<String> copySelectedParticipantKeys() {
+            return new HashSet<>(selectedParticipantKeys);
+        }
+
+        void selectParticipants(@NonNull Set<String> participantKeys) {
+            selectedParticipantKeys.addAll(participantKeys);
+        }
+
+        @NonNull
+        ReceiptItem copy() {
+            ReceiptItem copy = new ReceiptItem(name, amountCents, splitQuantity);
+            copy.selectParticipants(selectedParticipantKeys);
+            return copy;
         }
     }
 }

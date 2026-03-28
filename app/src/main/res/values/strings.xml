@@ -66,6 +66,11 @@
     <string name="settings_empty_state">Settings coming soon.</string>
     <string name="settings_auto_rotate_image_title">Auto Rotate Image</string>
     <string name="settings_auto_rotate_image_description">Try to align the photo of the receipt horizontally before cropping.</string>
+    <string name="settings_split_items_title">Split Items</string>
+    <string name="settings_split_items_description">Whether to list similar items individually or group them together.</string>
+    <string name="settings_pre_added_participants_title">Pre Added Participants</string>
+    <string name="settings_pre_added_participants_description">Participants that are automatically added to each new receipt.</string>
+    <string name="manage">Manage</string>
     <string name="yes">Yes</string>
     <string name="no">No</string>
     <string name="receipt_summary_title">Receipt Summary</string>

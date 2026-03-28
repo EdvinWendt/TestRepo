@@ -21,6 +21,7 @@ public class ReceiptParserTest {
         assertNotNull(item);
         assertEquals("Avfallsp\u00e5se dragsn 2st*", item.getName());
         assertEquals("41,80", item.getPrice());
+        assertEquals(2, item.getSplitQuantity());
     }
 
     @Test
@@ -42,6 +43,36 @@ public class ReceiptParserTest {
         assertNotNull(item);
         assertEquals("Avfallsp\u00e5se dragsn", item.getName());
         assertEquals("41,80", item.getPrice());
+        assertEquals(2, item.getSplitQuantity());
+    }
+
+    @Test
+    public void expandsDiscreteQuantityRowsIntoIndividualItems() {
+        ReceiptParser.ReceiptItem item = parser.parseReceiptItem(
+                "Risifrutti Hallon 2118781 12,95 4,00 st 51,80"
+        );
+
+        assertNotNull(item);
+
+        ArrayList<ReceiptParser.ReceiptItem> expandedItems =
+                parser.expandDiscreteQuantityItems(new ArrayList<>(Arrays.asList(item)));
+
+        assertEquals(4, expandedItems.size());
+        assertEquals("Risifrutti Hallon", expandedItems.get(0).getName());
+        assertEquals("12,95", expandedItems.get(0).getPrice());
+        assertEquals("12,95", expandedItems.get(1).getPrice());
+        assertEquals("12,95", expandedItems.get(2).getPrice());
+        assertEquals("12,95", expandedItems.get(3).getPrice());
+    }
+
+    @Test
+    public void formatsGroupedDisplayNameWithQuantityPrefix() {
+        ReceiptParser.ReceiptItem item = parser.parseReceiptItem(
+                "Risifrutti Hallon 2118781 12,95 4,00 st 51,80"
+        );
+
+        assertNotNull(item);
+        assertEquals("(4) Risifrutti Hallon", parser.getGroupedDisplayName(item));
     }
 
     @Test
@@ -68,6 +99,25 @@ public class ReceiptParserTest {
         assertEquals("69,00", items.get(0).getPrice());
         assertEquals("Mannafrutti Hallon 4st*", items.get(1).getName());
         assertEquals("40,00", items.get(1).getPrice());
+        assertEquals(4, items.get(1).getSplitQuantity());
+    }
+
+    @Test
+    public void expandsDiscountAdjustedQuantityItemUsingFinalTotal() {
+        ArrayList<String> rows = new ArrayList<>(Arrays.asList(
+                "*Mannafrutti Hallon 4st*12,95 51,80",
+                "Rabatt: Ris-, mannam 4f40kr -11,80"
+        ));
+
+        ArrayList<ReceiptParser.ReceiptItem> items = parser.extractReceiptItems(rows);
+        ArrayList<ReceiptParser.ReceiptItem> expandedItems = parser.expandDiscreteQuantityItems(items);
+
+        assertEquals(4, expandedItems.size());
+        assertEquals("Mannafrutti Hallon", expandedItems.get(0).getName());
+        assertEquals("10,00", expandedItems.get(0).getPrice());
+        assertEquals("10,00", expandedItems.get(1).getPrice());
+        assertEquals("10,00", expandedItems.get(2).getPrice());
+        assertEquals("10,00", expandedItems.get(3).getPrice());
     }
 
     @Test
