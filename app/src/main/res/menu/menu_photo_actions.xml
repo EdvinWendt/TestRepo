@@ -2,12 +2,12 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
 
     <item
+        android:id="@+id/action_import_photo"
+        android:icon="@drawable/ic_menu_import_photo"
+        android:title="@string/import_photo" />
+
+    <item
         android:id="@+id/action_settings"
         android:icon="@drawable/ic_menu_settings"
         android:title="@string/settings" />
-
-    <item
-        android:id="@+id/action_refresh_receipt"
-        android:icon="@drawable/ic_menu_refresh"
-        android:title="@string/refresh" />
 </menu>

@@ -12,6 +12,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.Paint;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
@@ -121,8 +122,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     private MaterialButton cropReceiptButton;
     private View receiptResultsLayout;
     private LinearLayout participantButtonsLayout;
-    private TextInputEditText receiptTitleView;
-    private AppCompatImageView receiptTitleIconView;
+    private TextView screenTitleView;
     private View receiptActionsButton;
     private ListView receiptItemsList;
     private TextView receiptTotalValueView;
@@ -136,10 +136,13 @@ public class NewReceiptActivity extends AppCompatActivity {
     private final ArrayList<ReceiptParser.ReceiptItem> trackedReceiptItems = new ArrayList<>();
     private final ArrayList<Participant> participants = new ArrayList<>();
     private ReceiptItemsAdapter receiptItemsAdapter;
+    private int currentScreenTitleResId = R.string.photo_screen_title;
     private int actionsMenuMode = ACTIONS_MODE_HIDDEN;
     private boolean participantControlsVisible;
     private boolean sendRequestsAfterSmsPermission;
     private boolean showAddParticipantDialogAfterContactsPermission;
+    @NonNull
+    private String currentReceiptName = "";
     @NonNull
     private String pendingSendRequestsMessage = "";
     @Nullable
@@ -188,6 +191,12 @@ public class NewReceiptActivity extends AppCompatActivity {
                     ).show();
                 }
             });
+    private final ActivityResultLauncher<String> importPhotoLauncher =
+            registerForActivityResult(new ActivityResultContracts.GetContent(), imageUri -> {
+                if (imageUri != null) {
+                    importPhotoToCropView(imageUri);
+                }
+            });
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -201,14 +210,15 @@ public class NewReceiptActivity extends AppCompatActivity {
         cropReceiptButton = findViewById(R.id.button_crop_receipt);
         receiptResultsLayout = findViewById(R.id.layout_receipt_results);
         participantButtonsLayout = findViewById(R.id.layout_participant_buttons);
-        receiptTitleView = findViewById(R.id.text_new_receipt_title);
-        receiptTitleIconView = findViewById(R.id.image_receipt_title_edit);
+        screenTitleView = findViewById(R.id.text_new_receipt_screen_title);
         receiptItemsList = findViewById(R.id.list_receipt_items);
         receiptTotalValueView = findViewById(R.id.text_receipt_total_value);
         nextButton = findViewById(R.id.button_next);
+        TextView addReceiptItemText = findViewById(R.id.text_add_receipt_item);
         View backButton = findViewById(R.id.button_back);
         receiptActionsButton = findViewById(R.id.button_receipt_actions);
         captureButton = findViewById(R.id.button_take_picture);
+        currentReceiptName = getString(R.string.new_receipt_screen_title);
 
         backgroundExecutor = Executors.newSingleThreadExecutor();
         receiptItemsAdapter = new ReceiptItemsAdapter();
@@ -218,7 +228,6 @@ public class NewReceiptActivity extends AppCompatActivity {
                 showEditReceiptItemDialog(receiptItems.get(position));
             }
         });
-        configureReceiptTitleInput();
         ensureDefaultParticipant();
         applyPreAddedParticipants();
         refreshParticipantButtons();
@@ -229,7 +238,11 @@ public class NewReceiptActivity extends AppCompatActivity {
         refreshDefaultParticipantPhoneNumber();
         requestPhoneNumberPermissionsIfNeeded();
 
+        addReceiptItemText.setPaintFlags(
+                addReceiptItemText.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG
+        );
         backButton.setOnClickListener(view -> showAbandonReceiptDialog());
+        addReceiptItemText.setOnClickListener(view -> showAddReceiptItemDialog());
         receiptActionsButton.setOnClickListener(this::showActiveActionsMenu);
         nextButton.setOnClickListener(view -> showReceiptSummaryDialog());
         captureButton.setOnClickListener(view -> {
@@ -346,52 +359,6 @@ public class NewReceiptActivity extends AppCompatActivity {
         finish();
     }
 
-    private void configureReceiptTitleInput() {
-        if (receiptTitleView == null) {
-            return;
-        }
-
-        receiptTitleView.setOnFocusChangeListener((view, hasFocus) -> updateReceiptTitleIcon());
-        receiptTitleView.setOnEditorActionListener((view, actionId, event) -> {
-            boolean confirmAction = actionId == EditorInfo.IME_ACTION_DONE
-                    || actionId == EditorInfo.IME_ACTION_GO
-                    || actionId == EditorInfo.IME_ACTION_SEND
-                    || actionId == EditorInfo.IME_ACTION_NEXT
-                    || (event != null
-                    && event.getAction() == KeyEvent.ACTION_DOWN
-                    && event.getKeyCode() == KeyEvent.KEYCODE_ENTER);
-            if (!confirmAction) {
-                return false;
-            }
-
-            clearReceiptTitleFocus();
-            return true;
-        });
-        receiptTitleView.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-            }
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-                updateReceiptTitleIcon();
-            }
-
-            @Override
-            public void afterTextChanged(Editable s) {
-            }
-        });
-        receiptTitleView.addOnLayoutChangeListener(
-                (view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
-                        updateReceiptTitleIcon()
-        );
-        receiptTitleView.post(this::updateReceiptTitleIcon);
-    }
-
-    private void clearReceiptTitleFocus() {
-        clearTextInputFocus(receiptTitleView, findViewById(R.id.layout_new_receipt_root));
-    }
-
     private void clearTextInputFocus(@Nullable TextInputEditText inputView, @Nullable View fallbackView) {
         if (inputView == null) {
             return;
@@ -410,55 +377,20 @@ public class NewReceiptActivity extends AppCompatActivity {
         inputView.clearFocus();
     }
 
-    private void updateReceiptTitleIcon() {
-        if (receiptTitleView == null || receiptTitleIconView == null) {
-            return;
+    private void setScreenTitle(int titleResId) {
+        currentScreenTitleResId = titleResId;
+        if (screenTitleView != null) {
+            screenTitleView.setText(titleResId);
         }
-
-        if (receiptTitleView.isFocused()) {
-            receiptTitleIconView.setVisibility(View.INVISIBLE);
-            return;
-        }
-
-        int editWidth = receiptTitleView.getWidth();
-        int iconWidth = receiptTitleIconView.getWidth();
-        if (editWidth == 0 || iconWidth == 0) {
-            receiptTitleIconView.post(this::updateReceiptTitleIcon);
-            return;
-        }
-
-        CharSequence text = receiptTitleView.getText();
-        String displayedText = text == null ? "" : text.toString();
-
-        int editLeft = receiptTitleView.getLeft();
-        int contentStart = editLeft + receiptTitleView.getPaddingStart();
-        int contentEnd = editLeft + editWidth - receiptTitleView.getPaddingEnd();
-        int contentWidth = Math.max(0, contentEnd - contentStart);
-        float textWidth = displayedText.isEmpty()
-                ? 0f
-                : receiptTitleView.getPaint().measureText(displayedText);
-        int iconGap = dpToPx(8);
-
-        float desiredIconX;
-        if (displayedText.isEmpty()) {
-            desiredIconX = contentStart;
-        } else {
-            float textStart = contentStart + Math.max(0f, (contentWidth - textWidth) / 2f);
-            desiredIconX = textStart - iconWidth - iconGap;
-        }
-
-        float minimumIconX = contentStart;
-        float maximumIconX = contentEnd - iconWidth;
-        float clampedIconX = Math.max(minimumIconX, Math.min(desiredIconX, maximumIconX));
-
-        receiptTitleIconView.setX(clampedIconX);
-        receiptTitleIconView.setVisibility(View.VISIBLE);
-        receiptTitleIconView.bringToFront();
     }
 
     private void showActiveActionsMenu(View anchorView) {
         if (actionsMenuMode == ACTIONS_MODE_SETTINGS_ONLY) {
-            SettingsMenuHelper.showSettingsMenu(this, anchorView);
+            if (currentScreenTitleResId == R.string.photo_screen_title) {
+                showPhotoActionsMenu(anchorView);
+            } else {
+                SettingsMenuHelper.showSettingsMenu(this, anchorView);
+            }
             return;
         }
 
@@ -469,6 +401,26 @@ public class NewReceiptActivity extends AppCompatActivity {
         showReceiptActionsMenu(anchorView);
     }
 
+    private void showPhotoActionsMenu(View anchorView) {
+        PopupMenu popupMenu = new PopupMenu(this, anchorView);
+        popupMenu.inflate(R.menu.menu_photo_actions);
+        popupMenu.setForceShowIcon(true);
+        tintPopupMenuIcons(popupMenu);
+        popupMenu.setOnMenuItemClickListener(menuItem -> {
+            int itemId = menuItem.getItemId();
+            if (itemId == R.id.action_import_photo) {
+                openImportPhotoPicker();
+                return true;
+            }
+            if (itemId == R.id.action_settings) {
+                SettingsDialogFragment.show(getSupportFragmentManager());
+                return true;
+            }
+            return false;
+        });
+        popupMenu.show();
+    }
+
     private void showReceiptActionsMenu(View anchorView) {
         PopupMenu popupMenu = new PopupMenu(this, anchorView);
         popupMenu.inflate(R.menu.menu_new_receipt_actions);
@@ -476,10 +428,6 @@ public class NewReceiptActivity extends AppCompatActivity {
         tintPopupMenuIcons(popupMenu);
         popupMenu.setOnMenuItemClickListener(menuItem -> {
             int itemId = menuItem.getItemId();
-            if (itemId == R.id.action_add_item) {
-                showAddReceiptItemDialog();
-                return true;
-            }
             if (itemId == R.id.action_refresh_receipt) {
                 refreshReceiptFlow();
                 return true;
@@ -538,6 +486,10 @@ public class NewReceiptActivity extends AppCompatActivity {
         Toast.makeText(this, R.string.refresh_unavailable, Toast.LENGTH_SHORT).show();
     }
 
+    private void openImportPhotoPicker() {
+        importPhotoLauncher.launch("image/*");
+    }
+
     private boolean handleSharedReceiptIntent(@Nullable Intent intent) {
         if (intent == null) {
             return false;
@@ -559,6 +511,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         stopCameraPreview();
         previewView.setVisibility(View.GONE);
         captureButton.setVisibility(View.GONE);
+        setScreenTitle(R.string.receipt_screen_title);
         showStatusMessage(R.string.importing_shared_receipt, false);
 
         backgroundExecutor.execute(() -> {
@@ -648,6 +601,74 @@ public class NewReceiptActivity extends AppCompatActivity {
             startCamera();
         } else {
             showPermissionRequired();
+        }
+    }
+
+    private void importPhotoToCropView(@NonNull Uri imageUri) {
+        clearCurrentReceiptResults();
+        stopCameraPreview();
+        previewView.setVisibility(View.GONE);
+        captureButton.setVisibility(View.GONE);
+        cropReceiptLayout.setVisibility(View.GONE);
+        lastSharedReceiptIntent = null;
+        lastRefreshableReceiptImageFile = null;
+        setScreenTitle(R.string.crop_screen_title);
+        showStatusMessage(R.string.importing_photo, false);
+
+        backgroundExecutor.execute(() -> {
+            try {
+                File importedPhotoFile = createImageFile("imported_receipt_");
+                copyUriToFile(imageUri, importedPhotoFile);
+                runOnUiThread(() -> prepareImportedPhotoForCrop(importedPhotoFile));
+            } catch (IOException exception) {
+                runOnUiThread(this::handleImportedPhotoFailure);
+            }
+        });
+    }
+
+    private void prepareImportedPhotoForCrop(@NonNull File imageFile) {
+        if (!AppSettings.isAutoRotateImageEnabled(this)) {
+            showCropEditor(imageFile, 0f);
+            return;
+        }
+
+        InputImage inputImage;
+        try {
+            inputImage = InputImage.fromFilePath(this, Uri.fromFile(imageFile));
+        } catch (IOException exception) {
+            showCropEditor(imageFile, 0f);
+            return;
+        }
+
+        textRecognizer.process(inputImage)
+                .addOnSuccessListener(
+                        recognizedText -> showCropEditor(
+                                imageFile,
+                                computeReceiptAlignmentRotationDegrees(recognizedText)
+                        )
+                )
+                .addOnFailureListener(exception -> showCropEditor(imageFile, 0f));
+    }
+
+    private void handleImportedPhotoFailure() {
+        cameraStatusView.setVisibility(View.GONE);
+        Toast.makeText(this, R.string.import_photo_failed, Toast.LENGTH_SHORT).show();
+        showCameraFallbackAfterImport();
+    }
+
+    private void copyUriToFile(@NonNull Uri sourceUri, @NonNull File outputFile) throws IOException {
+        try (InputStream inputStream = getContentResolver().openInputStream(sourceUri);
+             FileOutputStream outputStream = new FileOutputStream(outputFile)) {
+            if (inputStream == null) {
+                throw new IOException("Unable to read selected photo");
+            }
+
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                outputStream.write(buffer, 0, bytesRead);
+            }
+            outputStream.flush();
         }
     }
 
@@ -886,6 +907,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     private void startCamera() {
+        setScreenTitle(R.string.photo_screen_title);
         captureButton.setEnabled(false);
         ListenableFuture<ProcessCameraProvider> cameraProviderFuture =
                 ProcessCameraProvider.getInstance(this);
@@ -1012,6 +1034,7 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private void showCropEditor(File imageFile, float autoRotateDegrees) {
         stopCameraPreview();
+        setScreenTitle(R.string.crop_screen_title);
         previewView.setVisibility(View.GONE);
         captureButton.setVisibility(View.GONE);
         cropReceiptLayout.setVisibility(View.GONE);
@@ -1050,6 +1073,7 @@ public class NewReceiptActivity extends AppCompatActivity {
             return;
         }
 
+        setScreenTitle(R.string.crop_screen_title);
         cropReceiptButton.setEnabled(false);
         cropReceiptLayout.setVisibility(View.GONE);
         showStatusMessage(R.string.scanning_cropped_receipt, false);
@@ -1105,6 +1129,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         stopCameraPreview();
         previewView.setVisibility(View.GONE);
         captureButton.setVisibility(View.GONE);
+        setScreenTitle(R.string.receipt_screen_title);
         showStatusMessage(R.string.refreshing_receipt, false);
 
         InputImage inputImage;
@@ -1449,6 +1474,7 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private void showReceiptResultsUi() {
         stopCameraPreview();
+        setScreenTitle(R.string.receipt_screen_title);
         cameraStatusView.setVisibility(View.GONE);
         previewView.setVisibility(View.GONE);
         cropReceiptLayout.setVisibility(View.GONE);
@@ -2171,6 +2197,8 @@ public class NewReceiptActivity extends AppCompatActivity {
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_receipt_summary, null);
         View summaryRootView = dialogView.findViewById(R.id.layout_receipt_summary_root);
         LinearLayout summaryRowsLayout = dialogView.findViewById(R.id.layout_receipt_summary_rows);
+        TextInputEditText receiptNameInputView =
+                dialogView.findViewById(R.id.edit_receipt_summary_receipt_name);
         TextInputEditText messageInputView =
                 dialogView.findViewById(R.id.edit_receipt_summary_message);
         View closeButton = dialogView.findViewById(R.id.button_close_receipt_summary);
@@ -2196,13 +2224,17 @@ public class NewReceiptActivity extends AppCompatActivity {
         Dialog dialog = new Dialog(this, R.style.TestRepo_FullScreenDialog) {
             @Override
             public boolean dispatchTouchEvent(@NonNull MotionEvent event) {
-                if (event.getAction() == MotionEvent.ACTION_DOWN
-                        && messageInputView.isFocused()) {
-                    Rect messageBounds = new Rect();
-                    messageInputView.getGlobalVisibleRect(messageBounds);
-                    if (!messageBounds.contains((int) event.getRawX(), (int) event.getRawY())) {
-                        clearTextInputFocus(messageInputView, summaryRootView);
-                    }
+                if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                    clearSummaryTextInputFocusIfTappedOutside(
+                            receiptNameInputView,
+                            summaryRootView,
+                            event
+                    );
+                    clearSummaryTextInputFocusIfTappedOutside(
+                            messageInputView,
+                            summaryRootView,
+                            event
+                    );
                 }
 
                 return super.dispatchTouchEvent(event);
@@ -2213,6 +2245,10 @@ public class NewReceiptActivity extends AppCompatActivity {
         closeButton.setOnClickListener(view -> dialog.dismiss());
 
         sendRequestsButton.setOnClickListener(view -> {
+            String receiptName = getText(receiptNameInputView);
+            if (!receiptName.isEmpty()) {
+                setCurrentReceiptName(receiptName);
+            }
             dialog.dismiss();
             openSendRequestsFlow(getText(messageInputView));
         });
@@ -2234,6 +2270,26 @@ public class NewReceiptActivity extends AppCompatActivity {
             return;
         }
         sendParticipantPaymentRequests();
+    }
+
+    private void clearSummaryTextInputFocusIfTappedOutside(
+            @NonNull TextInputEditText inputView,
+            @NonNull View fallbackView,
+            @NonNull MotionEvent event
+    ) {
+        if (!inputView.isFocused()) {
+            return;
+        }
+
+        Rect inputBounds = new Rect();
+        inputView.getGlobalVisibleRect(inputBounds);
+        if (!inputBounds.contains((int) event.getRawX(), (int) event.getRawY())) {
+            clearTextInputFocus(inputView, fallbackView);
+        }
+    }
+
+    private void setCurrentReceiptName(@NonNull String receiptName) {
+        currentReceiptName = receiptName;
     }
 
     private void sendParticipantPaymentRequests() {
@@ -2386,11 +2442,7 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     @NonNull
     private String getCurrentReceiptName() {
-        if (receiptTitleView == null) {
-            return getString(R.string.new_receipt_screen_title);
-        }
-
-        String title = normalizeWhitespace(receiptTitleView.getText().toString());
+        String title = normalizeWhitespace(currentReceiptName);
         return title.isEmpty() ? getString(R.string.new_receipt_screen_title) : title;
     }
 
@@ -2576,6 +2628,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     private void onReceiptNotDetected() {
+        setScreenTitle(R.string.photo_screen_title);
         cameraStatusView.setVisibility(View.GONE);
         captureButton.setEnabled(true);
         setActionsMenuMode(ACTIONS_MODE_SETTINGS_ONLY);
@@ -2583,6 +2636,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     private void onCroppedReceiptNotDetected() {
+        setScreenTitle(R.string.crop_screen_title);
         cameraStatusView.setVisibility(View.GONE);
         cropReceiptLayout.setVisibility(View.VISIBLE);
         cropReceiptButton.setEnabled(true);
@@ -2883,6 +2937,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     private void showPermissionRequired() {
+        setScreenTitle(R.string.photo_screen_title);
         previewView.setVisibility(View.VISIBLE);
         cropReceiptLayout.setVisibility(View.GONE);
         receiptResultsLayout.setVisibility(View.GONE);
@@ -2895,6 +2950,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     private void showCameraUnavailable() {
+        setScreenTitle(R.string.photo_screen_title);
         previewView.setVisibility(View.VISIBLE);
         cropReceiptLayout.setVisibility(View.GONE);
         receiptResultsLayout.setVisibility(View.GONE);
@@ -2914,21 +2970,6 @@ public class NewReceiptActivity extends AppCompatActivity {
         receiptActionsButton.setContentDescription(getString(
                 mode == ACTIONS_MODE_RECEIPT ? R.string.receipt_actions : R.string.more_options
         ));
-    }
-
-    @Override
-    public boolean dispatchTouchEvent(MotionEvent event) {
-        if (event.getAction() == MotionEvent.ACTION_DOWN
-                && receiptTitleView != null
-                && receiptTitleView.isFocused()) {
-            Rect titleBounds = new Rect();
-            receiptTitleView.getGlobalVisibleRect(titleBounds);
-            if (!titleBounds.contains((int) event.getRawX(), (int) event.getRawY())) {
-                clearReceiptTitleFocus();
-            }
-        }
-
-        return super.dispatchTouchEvent(event);
     }
 
     @Override

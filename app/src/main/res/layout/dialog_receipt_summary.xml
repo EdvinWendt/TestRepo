@@ -26,11 +26,11 @@
             android:layout_alignParentStart="true"
             android:layout_centerVertical="true"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/back"
+            android:contentDescription="@string/close"
             android:padding="8dp"
             android:scaleType="center"
             android:tint="@android:color/white"
-            app:srcCompat="@drawable/ic_back_chevron" />
+            app:srcCompat="@drawable/ic_close" />
 
         <TextView
             android:id="@+id/text_receipt_summary_title"
@@ -67,10 +67,29 @@
         </ScrollView>
 
         <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/input_layout_receipt_summary_message"
+            android:id="@+id/input_layout_receipt_summary_receipt_name"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
+            android:hint="@string/receipt_summary_receipt_name_label"
+            app:counterEnabled="true"
+            app:counterMaxLength="20">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/edit_receipt_summary_receipt_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:imeOptions="actionDone"
+                android:inputType="textCapWords"
+                android:maxLength="20"
+                android:maxLines="1" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/input_layout_receipt_summary_message"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
             android:hint="@string/receipt_summary_message_label"
             app:counterEnabled="true"
             app:counterMaxLength="50">

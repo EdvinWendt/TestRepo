@@ -21,13 +21,15 @@
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
             android:textAppearance="?attr/textAppearanceBodyLarge"
+            android:textColor="@android:color/white"
             android:textStyle="bold" />
 
         <TextView
             android:id="@+id/text_receipt_item_price"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodyMedium" />
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textColor="#D9FFFFFF" />
     </LinearLayout>
 
     <LinearLayout

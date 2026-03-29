@@ -4,16 +4,20 @@
     android:id="@+id/layout_new_receipt_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="?attr/colorSurface"
     android:focusable="true"
     android:focusableInTouchMode="true"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:orientation="vertical">
 
     <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:minHeight="48dp">
+        android:background="?attr/colorPrimary"
+        android:minHeight="56dp"
+        android:paddingStart="16dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="12dp">
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/button_back"
@@ -28,49 +32,15 @@
             android:tint="@android:color/white"
             app:srcCompat="@drawable/ic_back_chevron" />
 
-        <FrameLayout
-            android:id="@+id/layout_receipt_title_container"
-            android:layout_width="match_parent"
+        <TextView
+            android:id="@+id/text_new_receipt_screen_title"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_centerVertical="true"
-            android:layout_marginStart="12dp"
-            android:layout_marginEnd="12dp"
-            android:layout_toEndOf="@id/button_back"
-            android:layout_toStartOf="@id/button_receipt_actions">
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center_vertical"
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/text_new_receipt_title"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center"
-                    android:imeOptions="actionDone"
-                    android:inputType="textCapWords"
-                    android:maxLength="20"
-                    android:maxLines="1"
-                    android:paddingTop="10dp"
-                    android:paddingBottom="10dp"
-                    android:selectAllOnFocus="true"
-                    android:text="@string/new_receipt_screen_title"
-                    android:textAlignment="center"
-                    android:textAppearance="?attr/textAppearanceTitleMedium"
-                    android:textStyle="bold" />
-            </com.google.android.material.textfield.TextInputLayout>
-
-            <androidx.appcompat.widget.AppCompatImageView
-                android:id="@+id/image_receipt_title_edit"
-                android:layout_width="20dp"
-                android:layout_height="20dp"
-                android:layout_gravity="start|center_vertical"
-                android:importantForAccessibility="no"
-                android:tint="?attr/colorOnSurfaceVariant"
-                app:srcCompat="@drawable/ic_receipt_title_edit" />
-        </FrameLayout>
+            android:layout_centerInParent="true"
+            android:text="@string/photo_screen_title"
+            android:textAppearance="?attr/textAppearanceTitleLarge"
+            android:textColor="@android:color/white"
+            android:textStyle="bold" />
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/button_receipt_actions"
@@ -79,149 +49,212 @@
             android:layout_alignParentEnd="true"
             android:layout_centerVertical="true"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/receipt_actions"
+            android:contentDescription="@string/more_options"
             android:padding="8dp"
             android:scaleType="center"
-            android:tint="?attr/colorOnSurface"
+            android:tint="@android:color/white"
             android:visibility="invisible"
             app:srcCompat="@drawable/ic_more_vert" />
     </RelativeLayout>
 
     <LinearLayout
-        android:id="@+id/layout_participant_buttons"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:gravity="center_horizontal"
-        android:orientation="vertical"
-        android:visibility="gone" />
-
-    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1">
-
-        <androidx.camera.view.PreviewView
-            android:id="@+id/view_camera_preview"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:background="#000000" />
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:padding="16dp">
 
         <LinearLayout
-            android:id="@+id/layout_crop_receipt"
+            android:id="@+id/layout_participant_buttons"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:gravity="center_horizontal"
             android:orientation="vertical"
-            android:padding="8dp"
-            android:visibility="gone">
+            android:visibility="gone" />
 
-            <TextView
-                android:id="@+id/text_crop_receipt_hint"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:gravity="center"
-                android:text="@string/crop_receipt_hint"
-                android:textAppearance="?attr/textAppearanceBodyMedium" />
-
-            <com.example.testrepo.ReceiptCropImageView
-                android:id="@+id/view_receipt_crop"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/button_crop_receipt"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="@string/button_crop_receipt"
-                app:cornerRadius="20dp" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/layout_receipt_results"
+        <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:orientation="vertical"
-            android:padding="8dp"
-            android:visibility="gone">
+            android:layout_height="0dp"
+            android:layout_weight="1">
 
-            <TextView
-                android:id="@+id/text_receipt_items_title"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:text="@string/receipt_items_title"
-                android:textAppearance="?attr/textAppearanceTitleMedium"
-                android:textStyle="bold" />
-
-            <ListView
-                android:id="@+id/list_receipt_items"
+            <androidx.camera.view.PreviewView
+                android:id="@+id/view_camera_preview"
                 android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
-                android:layout_marginBottom="12dp"
-                android:divider="?attr/colorOutlineVariant"
-                android:dividerHeight="1dp" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="?attr/colorOutlineVariant" />
+                android:layout_height="match_parent"
+                android:background="#000000" />
 
             <LinearLayout
+                android:id="@+id/layout_crop_receipt"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingTop="12dp">
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:padding="8dp"
+                android:visibility="gone">
 
                 <TextView
-                    android:id="@+id/text_receipt_total_label"
-                    android:layout_width="0dp"
+                    android:id="@+id/text_crop_receipt_hint"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/receipt_total_label"
-                    android:textAppearance="?attr/textAppearanceTitleMedium"
-                    android:textStyle="bold" />
+                    android:layout_marginBottom="12dp"
+                    android:gravity="center"
+                    android:text="@string/crop_receipt_hint"
+                    android:textAppearance="?attr/textAppearanceBodyMedium" />
 
-                <TextView
-                    android:id="@+id/text_receipt_total_value"
-                    android:layout_width="wrap_content"
+                <com.example.testrepo.ReceiptCropImageView
+                    android:id="@+id/view_receipt_crop"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_crop_receipt"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="0,00"
-                    android:textAppearance="?attr/textAppearanceTitleMedium"
-                    android:textStyle="bold" />
+                    android:layout_marginTop="16dp"
+                    android:text="@string/button_crop_receipt"
+                    app:cornerRadius="20dp" />
             </LinearLayout>
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/button_next"
+            <LinearLayout
+                android:id="@+id/layout_receipt_results"
                 android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:padding="8dp"
+                android:visibility="gone">
+
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    app:cardBackgroundColor="#1F1F1F"
+                    app:cardCornerRadius="20dp"
+                    app:strokeWidth="0dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical"
+                        android:paddingTop="18dp"
+                        android:paddingBottom="18dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="12dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingStart="20dp"
+                            android:paddingEnd="20dp">
+
+                            <TextView
+                                android:id="@+id/text_receipt_items_title"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/receipt_items_title"
+                                android:textAppearance="?attr/textAppearanceTitleMedium"
+                                android:textColor="@android:color/white"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/text_add_receipt_item"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:paddingStart="12dp"
+                                android:paddingTop="4dp"
+                                android:paddingEnd="4dp"
+                                android:paddingBottom="4dp"
+                                android:text="@string/add_item"
+                                android:textAppearance="?attr/textAppearanceBodyMedium"
+                                android:textColor="?attr/colorPrimary"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginBottom="12dp"
+                            android:background="#33FFFFFF" />
+
+                        <ListView
+                            android:id="@+id/list_receipt_items"
+                            android:layout_width="match_parent"
+                            android:layout_height="0dp"
+                            android:layout_weight="1"
+                            android:cacheColorHint="@android:color/transparent"
+                            android:divider="#33FFFFFF"
+                            android:dividerHeight="1dp" />
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginTop="12dp"
+                            android:background="#33FFFFFF" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingStart="20dp"
+                            android:paddingTop="12dp"
+                            android:paddingEnd="20dp">
+
+                            <TextView
+                                android:id="@+id/text_receipt_total_label"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/receipt_total_label"
+                                android:textAppearance="?attr/textAppearanceTitleMedium"
+                                android:textColor="@android:color/white"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/text_receipt_total_value"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="0,00"
+                                android:textAppearance="?attr/textAppearanceTitleMedium"
+                                android:textColor="@android:color/white"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_next"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/next" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/text_camera_status"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="@string/next" />
-        </LinearLayout>
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:padding="24dp"
+                android:text="@string/camera_permission_required"
+                android:textAppearance="?attr/textAppearanceBodyLarge" />
 
-        <TextView
-            android:id="@+id/text_camera_status"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:gravity="center"
-            android:padding="24dp"
-            android:text="@string/camera_permission_required"
-            android:textAppearance="?attr/textAppearanceBodyLarge" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/button_take_picture"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:enabled="false"
-            android:layout_gravity="bottom|center_horizontal"
-            android:layout_margin="24dp"
-            android:text="@string/button_take_picture"
-            app:cornerRadius="20dp" />
-    </FrameLayout>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/button_take_picture"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_margin="24dp"
+                android:enabled="false"
+                android:text="@string/button_take_picture"
+                app:cornerRadius="20dp" />
+        </FrameLayout>
+    </LinearLayout>
 
 </LinearLayout>
