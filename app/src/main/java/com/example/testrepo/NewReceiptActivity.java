@@ -2292,9 +2292,11 @@ public class NewReceiptActivity extends AppCompatActivity {
             if (!validateReceiptSummaryName(receiptNameInputLayout, receiptNameInputView)) {
                 return;
             }
-            setCurrentReceiptName(receiptName);
-            dialog.dismiss();
-            openSendRequestsFlow(getText(messageInputView));
+            showSendRequestsConfirmationDialog(
+                    dialog,
+                    receiptName,
+                    getText(messageInputView)
+            );
         });
 
         dialog.show();
@@ -2304,6 +2306,33 @@ public class NewReceiptActivity extends AppCompatActivity {
                     ViewGroup.LayoutParams.MATCH_PARENT
             );
         }
+    }
+
+    private void showSendRequestsConfirmationDialog(
+            @NonNull Dialog summaryDialog,
+            @NonNull String receiptName,
+            @NonNull String customMessage
+    ) {
+        View dialogView = getLayoutInflater().inflate(
+                R.layout.dialog_send_requests_confirmation,
+                null
+        );
+        MaterialButton noButton = dialogView.findViewById(R.id.button_send_requests_no);
+        MaterialButton yesButton = dialogView.findViewById(R.id.button_send_requests_yes);
+
+        AlertDialog confirmationDialog = new MaterialAlertDialogBuilder(this)
+                .setView(dialogView)
+                .create();
+
+        noButton.setOnClickListener(view -> confirmationDialog.dismiss());
+        yesButton.setOnClickListener(view -> {
+            setCurrentReceiptName(receiptName);
+            confirmationDialog.dismiss();
+            summaryDialog.dismiss();
+            openSendRequestsFlow(customMessage);
+        });
+
+        confirmationDialog.show();
     }
 
     private void openSendRequestsFlow(@NonNull String customMessage) {

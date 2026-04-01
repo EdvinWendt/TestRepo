@@ -87,6 +87,7 @@
     <string name="show_less">Show less</string>
     <string name="load_more">Load more</string>
     <string name="send_requests">Send Requests</string>
+    <string name="send_requests_confirmation_title">Send Requests?</string>
     <string name="participant_payment_request_message">Hello, %1$s!
 The total price of the %2$s receipt is %3$s. Your share is %4$s, please send it to me via swish.</string>
     <string name="participant_payment_request_custom_message">Message:
