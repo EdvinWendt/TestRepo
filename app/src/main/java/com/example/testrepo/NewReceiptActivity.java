@@ -30,7 +30,10 @@ import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.text.Editable;
+import android.text.InputFilter;
 import android.text.InputType;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextWatcher;
 import android.util.Patterns;
 import android.util.TypedValue;
@@ -100,6 +103,9 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import android.text.style.ForegroundColorSpan;
+import android.text.style.RelativeSizeSpan;
 
 public class NewReceiptActivity extends AppCompatActivity {
     private static final int MAX_CROP_BITMAP_DIMENSION = 2048;
@@ -2168,6 +2174,8 @@ public class NewReceiptActivity extends AppCompatActivity {
         TextView participantTotalView = dialogView.findViewById(R.id.text_participant_detail_total);
         MaterialButton removeParticipantButton =
                 dialogView.findViewById(R.id.button_remove_participant);
+        MaterialButton toggleParticipantItemsButton =
+                dialogView.findViewById(R.id.button_toggle_participant_items);
 
         participantNameView.setText(participant.name);
         participantPhoneView.setText(
@@ -2175,7 +2183,7 @@ public class NewReceiptActivity extends AppCompatActivity {
                         ? getString(R.string.participant_phone_unavailable)
                         : participant.phoneNumber
         );
-        participantTotalView.setText(formatCurrency(computeParticipantShareTotal(participant)));
+        participantTotalView.setText(buildParticipantTotalDisplayText(participant));
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setView(dialogView)
@@ -2190,6 +2198,16 @@ public class NewReceiptActivity extends AppCompatActivity {
             });
         }
 
+        toggleParticipantItemsButton.setText(R.string.clear);
+        toggleParticipantItemsButton.setOnClickListener(view -> {
+            boolean shouldClear = getString(R.string.clear).contentEquals(
+                    toggleParticipantItemsButton.getText()
+            );
+            setParticipantSelectionsForAllItems(participant, !shouldClear);
+            participantTotalView.setText(buildParticipantTotalDisplayText(participant));
+            toggleParticipantItemsButton.setText(shouldClear ? R.string.fill : R.string.clear);
+        });
+
         dialog.show();
     }
 
@@ -2197,12 +2215,37 @@ public class NewReceiptActivity extends AppCompatActivity {
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_receipt_summary, null);
         View summaryRootView = dialogView.findViewById(R.id.layout_receipt_summary_root);
         LinearLayout summaryRowsLayout = dialogView.findViewById(R.id.layout_receipt_summary_rows);
+        TextInputLayout receiptNameInputLayout =
+                dialogView.findViewById(R.id.input_layout_receipt_summary_receipt_name);
         TextInputEditText receiptNameInputView =
                 dialogView.findViewById(R.id.edit_receipt_summary_receipt_name);
         TextInputEditText messageInputView =
                 dialogView.findViewById(R.id.edit_receipt_summary_message);
         View closeButton = dialogView.findViewById(R.id.button_close_receipt_summary);
         MaterialButton sendRequestsButton = dialogView.findViewById(R.id.button_send_requests);
+
+        receiptNameInputView.setFilters(new InputFilter[]{
+                createReceiptSummaryNameInputFilter(),
+                new InputFilter.LengthFilter(20)
+        });
+        receiptNameInputView.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                receiptNameInputLayout.setError(null);
+                sendRequestsButton.setEnabled(
+                        isValidReceiptSummaryName(getText(receiptNameInputView))
+                );
+            }
+        });
+        sendRequestsButton.setEnabled(isValidReceiptSummaryName(getText(receiptNameInputView)));
 
         for (int index = 0; index < participants.size(); index++) {
             Participant participant = participants.get(index);
@@ -2246,9 +2289,10 @@ public class NewReceiptActivity extends AppCompatActivity {
 
         sendRequestsButton.setOnClickListener(view -> {
             String receiptName = getText(receiptNameInputView);
-            if (!receiptName.isEmpty()) {
-                setCurrentReceiptName(receiptName);
+            if (!validateReceiptSummaryName(receiptNameInputLayout, receiptNameInputView)) {
+                return;
             }
+            setCurrentReceiptName(receiptName);
             dialog.dismiss();
             openSendRequestsFlow(getText(messageInputView));
         });
@@ -2272,6 +2316,64 @@ public class NewReceiptActivity extends AppCompatActivity {
         sendParticipantPaymentRequests();
     }
 
+    @NonNull
+    private InputFilter createReceiptSummaryNameInputFilter() {
+        return (source, start, end, dest, dstart, dend) -> {
+            if (source == null) {
+                return null;
+            }
+
+            StringBuilder filteredText = new StringBuilder();
+            boolean changed = false;
+            for (int index = start; index < end; index++) {
+                char currentChar = source.charAt(index);
+                if (Character.isLetterOrDigit(currentChar) || currentChar == ' ') {
+                    filteredText.append(currentChar);
+                } else {
+                    changed = true;
+                }
+            }
+
+            return changed ? filteredText.toString() : null;
+        };
+    }
+
+    private boolean validateReceiptSummaryName(
+            @NonNull TextInputLayout receiptNameInputLayout,
+            @NonNull TextInputEditText receiptNameInputView
+    ) {
+        String receiptName = getText(receiptNameInputView);
+        if (receiptName.isEmpty()) {
+            receiptNameInputLayout.setError(getString(R.string.receipt_summary_receipt_name_required));
+            receiptNameInputView.requestFocus();
+            return false;
+        }
+
+        if (!isValidReceiptSummaryName(receiptName)) {
+            receiptNameInputLayout.setError(getString(R.string.receipt_summary_receipt_name_invalid));
+            receiptNameInputView.requestFocus();
+            return false;
+        }
+
+        receiptNameInputLayout.setError(null);
+        return true;
+    }
+
+    private boolean isValidReceiptSummaryName(@NonNull String receiptName) {
+        String trimmedName = receiptName.trim();
+        if (trimmedName.isEmpty()) {
+            return false;
+        }
+
+        for (int index = 0; index < trimmedName.length(); index++) {
+            char currentChar = trimmedName.charAt(index);
+            if (!Character.isLetterOrDigit(currentChar) && currentChar != ' ') {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private void clearSummaryTextInputFocusIfTappedOutside(
             @NonNull TextInputEditText inputView,
             @NonNull View fallbackView,
@@ -2292,6 +2394,72 @@ public class NewReceiptActivity extends AppCompatActivity {
         currentReceiptName = receiptName;
     }
 
+    private void setParticipantSelectionsForAllItems(
+            @NonNull Participant participant,
+            boolean selected
+    ) {
+        for (ReceiptParser.ReceiptItem item : receiptItems) {
+            if (selected) {
+                item.selectParticipant(participant.key);
+            } else {
+                item.deselectParticipant(participant.key);
+            }
+        }
+        syncTrackedReceiptItemsToCurrentItems();
+        refreshReceiptItems();
+    }
+
+    @NonNull
+    private CharSequence buildParticipantTotalDisplayText(@NonNull Participant participant) {
+        BigDecimal participantTotal = computeParticipantShareTotal(participant);
+        BigDecimal receiptTotal = BigDecimal.valueOf(computeReceiptTotalCents(), 2);
+        String amountText = formatCurrency(participantTotal);
+        String percentageText = " (" + formatParticipantSharePercentage(participantTotal, receiptTotal) + "%)";
+        SpannableString displayText = new SpannableString(amountText + percentageText);
+        int percentageStart = amountText.length();
+        displayText.setSpan(
+                new RelativeSizeSpan(0.72f),
+                percentageStart,
+                displayText.length(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        );
+        displayText.setSpan(
+                new ForegroundColorSpan(resolveThemeColor(android.R.attr.textColorSecondary, 0xFF808080)),
+                percentageStart,
+                displayText.length(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        );
+        return displayText;
+    }
+
+    @NonNull
+    private String formatParticipantSharePercentage(
+            @NonNull BigDecimal participantTotal,
+            @NonNull BigDecimal receiptTotal
+    ) {
+        if (receiptTotal.compareTo(BigDecimal.ZERO) <= 0) {
+            return "0";
+        }
+
+        return participantTotal
+                .multiply(BigDecimal.valueOf(100))
+                .divide(receiptTotal, 0, RoundingMode.HALF_UP)
+                .toPlainString();
+    }
+
+    private int resolveThemeColor(int attrResId, int fallbackColor) {
+        TypedValue typedValue = new TypedValue();
+        if (!getTheme().resolveAttribute(attrResId, typedValue, true)) {
+            return fallbackColor;
+        }
+
+        if (typedValue.resourceId != 0) {
+            return ContextCompat.getColor(this, typedValue.resourceId);
+        }
+
+        return typedValue.data;
+    }
+
     private void sendParticipantPaymentRequests() {
         String customMessage = pendingSendRequestsMessage;
         pendingSendRequestsMessage = "";
@@ -2301,7 +2469,8 @@ public class NewReceiptActivity extends AppCompatActivity {
         String receiptName = getCurrentReceiptName();
         String receiptTotal = formatCurrency(BigDecimal.valueOf(computeReceiptTotalCents(), 2));
         ArrayList<ReceiptHistoryStore.ParticipantShare> historyParticipants =
-                buildHistoryParticipantShares();
+                buildHistoryParticipants();
+        ArrayList<ReceiptHistoryStore.HistoryItem> historyItems = buildHistoryItems();
 
         for (Participant participant : participants) {
             if (isDefaultParticipant(participant)) {
@@ -2353,9 +2522,7 @@ public class NewReceiptActivity extends AppCompatActivity {
             return;
         }
 
-        if (!historyParticipants.isEmpty()) {
-            saveReceiptHistoryEntry(historyParticipants);
-        }
+        saveReceiptHistoryEntry(historyParticipants, historyItems, customMessage);
 
         int messageResId = skippedCount == 0
                 ? R.string.send_requests_success
@@ -2406,28 +2573,39 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     @NonNull
-    private ArrayList<ReceiptHistoryStore.ParticipantShare> buildHistoryParticipantShares() {
+    private ArrayList<ReceiptHistoryStore.ParticipantShare> buildHistoryParticipants() {
         ArrayList<ReceiptHistoryStore.ParticipantShare> participantShares = new ArrayList<>();
         for (Participant participant : participants) {
-            if (isDefaultParticipant(participant)) {
-                continue;
-            }
-
             BigDecimal participantTotal = computeParticipantShareTotal(participant);
-            if (participantTotal.compareTo(BigDecimal.ZERO) <= 0) {
-                continue;
-            }
-
             participantShares.add(new ReceiptHistoryStore.ParticipantShare(
+                    participant.key,
                     participant.name,
+                    participant.initials,
+                    participant.color,
+                    participant.phoneNumber,
                     formatCurrency(participantTotal)
             ));
         }
         return participantShares;
     }
 
+    @NonNull
+    private ArrayList<ReceiptHistoryStore.HistoryItem> buildHistoryItems() {
+        ArrayList<ReceiptHistoryStore.HistoryItem> historyItems = new ArrayList<>();
+        for (ReceiptParser.ReceiptItem item : receiptItems) {
+            historyItems.add(new ReceiptHistoryStore.HistoryItem(
+                    item.getName(),
+                    item.getDisplayPrice(),
+                    new ArrayList<>(item.copySelectedParticipantKeys())
+            ));
+        }
+        return historyItems;
+    }
+
     private void saveReceiptHistoryEntry(
-            @NonNull ArrayList<ReceiptHistoryStore.ParticipantShare> participantShares
+            @NonNull ArrayList<ReceiptHistoryStore.ParticipantShare> participantShares,
+            @NonNull ArrayList<ReceiptHistoryStore.HistoryItem> historyItems,
+            @NonNull String customMessage
     ) {
         ReceiptHistoryStore.saveEntry(
                 this,
@@ -2435,7 +2613,9 @@ public class NewReceiptActivity extends AppCompatActivity {
                         getCurrentReceiptName(),
                         receiptParser.formatAmount(computeReceiptTotalCents()),
                         getCurrentHistoryDate(),
-                        participantShares
+                        customMessage,
+                        participantShares,
+                        historyItems
                 )
         );
     }

@@ -83,6 +83,9 @@
     <string name="receipt_summary_title">Receipt Summary</string>
     <string name="receipt_summary_receipt_name_label">Receipt Name</string>
     <string name="receipt_summary_message_label">Message</string>
+    <string name="show_more">Show more</string>
+    <string name="show_less">Show less</string>
+    <string name="load_more">Load more</string>
     <string name="send_requests">Send Requests</string>
     <string name="participant_payment_request_message">Hello, %1$s!
 The total price of the %2$s receipt is %3$s. Your share is %4$s, please send it to me via swish.</string>
@@ -93,5 +96,9 @@ The total price of the %2$s receipt is %3$s. Your share is %4$s, please send it 
     <string name="send_requests_none">No participant requests to send.</string>
     <string name="send_requests_permission_required">SMS permission is required to send payment reminders.</string>
     <string name="remove">Remove</string>
+    <string name="clear">Clear</string>
+    <string name="fill">Fill</string>
+    <string name="receipt_summary_receipt_name_required">Enter a receipt name.</string>
+    <string name="receipt_summary_receipt_name_invalid">Use only letters, numbers, and spaces.</string>
     <string name="no_contacts">no contacts</string>
 </resources>
