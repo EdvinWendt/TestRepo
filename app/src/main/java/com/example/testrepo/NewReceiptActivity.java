@@ -99,6 +99,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -1697,10 +1698,13 @@ public class NewReceiptActivity extends AppCompatActivity {
         TextInputEditText phoneInput = dialogView.findViewById(R.id.input_participant_phone);
         ListView phoneContactsList = dialogView.findViewById(R.id.list_phone_contacts);
         TextView emptyContactsView = dialogView.findViewById(R.id.text_phone_contacts_empty);
+        View closeButton = dialogView.findViewById(R.id.button_close_add_participant);
         MaterialButton addParticipantButton =
                 dialogView.findViewById(R.id.button_add_participant_confirm);
 
         ArrayList<PhoneContact> phoneContacts = new ArrayList<>();
+        ArrayList<PhoneContact> allPhoneContacts = new ArrayList<>();
+        boolean[] contactsLoading = new boolean[]{contactsPermissionGranted};
         PhoneContactsAdapter phoneContactsAdapter = new PhoneContactsAdapter(phoneContacts);
         phoneContactsList.setAdapter(phoneContactsAdapter);
         phoneContactsList.setEmptyView(emptyContactsView);
@@ -1735,10 +1739,19 @@ public class NewReceiptActivity extends AppCompatActivity {
                         phoneInput,
                         addParticipantButton
                 );
+                updateVisiblePhoneContacts(
+                        phoneContactsAdapter,
+                        allPhoneContacts,
+                        getText(nameInput),
+                        emptyContactsView,
+                        contactsPermissionGranted,
+                        contactsLoading[0]
+                );
             }
         };
         nameInput.addTextChangedListener(validationWatcher);
         phoneInput.addTextChangedListener(validationWatcher);
+        configureAddParticipantKeyboardBehavior(dialogView, nameInput, phoneInput);
         updateAddParticipantButtonState(
                 nameLayout,
                 phoneLayout,
@@ -1747,10 +1760,10 @@ public class NewReceiptActivity extends AppCompatActivity {
                 addParticipantButton
         );
 
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.add_new_participant_title)
-                .setView(dialogView)
-                .create();
+        Dialog dialog = new Dialog(this, R.style.TestRepo_FullScreenDialog);
+        dialog.setContentView(dialogView);
+        dialog.setCancelable(true);
+        closeButton.setOnClickListener(view -> dialog.dismiss());
 
         addParticipantButton.setOnClickListener(view -> {
             String name = getText(nameInput);
@@ -1786,13 +1799,33 @@ public class NewReceiptActivity extends AppCompatActivity {
         });
 
         dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+            );
+        }
 
         if (!contactsPermissionGranted) {
-            emptyContactsView.setText(R.string.phone_contacts_permission_required);
+            updateVisiblePhoneContacts(
+                    phoneContactsAdapter,
+                    allPhoneContacts,
+                    getText(nameInput),
+                    emptyContactsView,
+                    false,
+                    false
+            );
             return;
         }
 
-        emptyContactsView.setText(R.string.loading_phone_contacts);
+        updateVisiblePhoneContacts(
+                phoneContactsAdapter,
+                allPhoneContacts,
+                getText(nameInput),
+                emptyContactsView,
+                true,
+                true
+        );
         backgroundExecutor.execute(() -> {
             ArrayList<PhoneContact> availableContacts = loadPhoneContactsFromDevice();
             runOnUiThread(() -> {
@@ -1800,16 +1833,63 @@ public class NewReceiptActivity extends AppCompatActivity {
                     return;
                 }
 
-                phoneContacts.clear();
-                phoneContacts.addAll(availableContacts);
-                phoneContactsAdapter.notifyDataSetChanged();
-                if (availableContacts.isEmpty()) {
-                    emptyContactsView.setText(R.string.no_phone_contacts);
-                } else {
-                    emptyContactsView.setText("");
-                }
+                allPhoneContacts.clear();
+                allPhoneContacts.addAll(availableContacts);
+                contactsLoading[0] = false;
+                updateVisiblePhoneContacts(
+                        phoneContactsAdapter,
+                        allPhoneContacts,
+                        getText(nameInput),
+                        emptyContactsView,
+                        true,
+                        false
+                );
             });
         });
+    }
+
+    private void updateVisiblePhoneContacts(
+            @NonNull PhoneContactsAdapter phoneContactsAdapter,
+            @NonNull List<PhoneContact> allPhoneContacts,
+            @NonNull String query,
+            @NonNull TextView emptyContactsView,
+            boolean contactsPermissionGranted,
+            boolean contactsLoading
+    ) {
+        if (!contactsPermissionGranted) {
+            phoneContactsAdapter.clear();
+            phoneContactsAdapter.notifyDataSetChanged();
+            emptyContactsView.setText(R.string.phone_contacts_permission_required);
+            return;
+        }
+
+        if (contactsLoading) {
+            phoneContactsAdapter.clear();
+            phoneContactsAdapter.notifyDataSetChanged();
+            emptyContactsView.setText(R.string.loading_phone_contacts);
+            return;
+        }
+
+        ArrayList<PhoneContact> filteredContacts = new ArrayList<>();
+        String normalizedQuery = normalizeWhitespace(query).toLowerCase(Locale.US);
+        for (PhoneContact contact : allPhoneContacts) {
+            if (normalizedQuery.isEmpty()
+                    || contact.name.toLowerCase(Locale.US).contains(normalizedQuery)) {
+                filteredContacts.add(contact);
+            }
+        }
+
+        phoneContactsAdapter.clear();
+        phoneContactsAdapter.addAll(filteredContacts);
+        phoneContactsAdapter.notifyDataSetChanged();
+
+        if (allPhoneContacts.isEmpty()) {
+            emptyContactsView.setText(R.string.no_phone_contacts);
+        } else if (filteredContacts.isEmpty()) {
+            emptyContactsView.setText(R.string.no_matching_phone_contacts);
+        } else {
+            emptyContactsView.setText("");
+        }
     }
 
     private ArrayList<PhoneContact> loadPhoneContactsFromDevice() {
@@ -2254,12 +2334,14 @@ public class NewReceiptActivity extends AppCompatActivity {
                     summaryRowsLayout,
                     false
             );
+            MaterialButton badgeButton = rowView.findViewById(R.id.button_summary_participant_badge);
             TextView nameView = rowView.findViewById(R.id.text_summary_participant_name);
             TextView amountView = rowView.findViewById(R.id.text_summary_participant_amount);
             View dividerView = rowView.findViewById(R.id.view_summary_participant_divider);
 
+            configureSummaryParticipantBadgeButton(badgeButton, participant);
             nameView.setText(participant.name);
-            amountView.setText(formatCurrency(computeParticipantShareTotal(participant)));
+            amountView.setText(buildParticipantTotalDisplayText(participant));
             dividerView.setVisibility(index == participants.size() - 1 ? View.GONE : View.VISIBLE);
             summaryRowsLayout.addView(rowView);
         }
@@ -2306,6 +2388,40 @@ public class NewReceiptActivity extends AppCompatActivity {
                     ViewGroup.LayoutParams.MATCH_PARENT
             );
         }
+    }
+
+    private void configureSummaryParticipantBadgeButton(
+            @NonNull MaterialButton badgeButton,
+            @NonNull Participant participant
+    ) {
+        int buttonSize = dpToPx(52);
+        ViewGroup.LayoutParams layoutParams = badgeButton.getLayoutParams();
+        if (layoutParams != null) {
+            layoutParams.width = buttonSize;
+            layoutParams.height = buttonSize;
+            badgeButton.setLayoutParams(layoutParams);
+        }
+        badgeButton.setText(getParticipantBadgeLabel(participant));
+        badgeButton.setAllCaps(false);
+        badgeButton.setTextSize(
+                TypedValue.COMPLEX_UNIT_SP,
+                getParticipantBadgeTextSizeSp(participant, false)
+        );
+        badgeButton.setCheckable(false);
+        badgeButton.setClickable(false);
+        badgeButton.setFocusable(false);
+        badgeButton.setInsetTop(0);
+        badgeButton.setInsetBottom(0);
+        badgeButton.setMinWidth(0);
+        badgeButton.setMinHeight(0);
+        badgeButton.setMinimumWidth(0);
+        badgeButton.setMinimumHeight(0);
+        badgeButton.setPadding(0, 0, 0, 0);
+        badgeButton.setCornerRadius(buttonSize / 2);
+        badgeButton.setStrokeWidth(0);
+        badgeButton.setBackgroundTintList(ColorStateList.valueOf(participant.color));
+        badgeButton.setTextColor(getParticipantTextColor(participant.color));
+        badgeButton.setContentDescription(participant.name);
     }
 
     private void showSendRequestsConfirmationDialog(
@@ -3238,16 +3354,90 @@ public class NewReceiptActivity extends AppCompatActivity {
             }
 
             PhoneContact contact = getItem(position);
+            MaterialButton badgeButton = itemView.findViewById(R.id.button_phone_contact_badge);
             TextView nameView = itemView.findViewById(R.id.text_phone_contact_name);
             TextView phoneView = itemView.findViewById(R.id.text_phone_contact_number);
 
             if (contact != null) {
+                configurePhoneContactBadgeButton(badgeButton, contact, position);
                 nameView.setText(contact.name);
                 phoneView.setText(contact.phoneNumber);
             }
 
             return itemView;
         }
+    }
+
+    private void configurePhoneContactBadgeButton(
+            @NonNull MaterialButton badgeButton,
+            @NonNull PhoneContact contact,
+            int contactIndex
+    ) {
+        int buttonSize = dpToPx(52);
+        ViewGroup.LayoutParams layoutParams = badgeButton.getLayoutParams();
+        if (layoutParams != null) {
+            layoutParams.width = buttonSize;
+            layoutParams.height = buttonSize;
+            badgeButton.setLayoutParams(layoutParams);
+        }
+        int badgeColor = createParticipantColor(contactIndex);
+        badgeButton.setText(getParticipantInitials(contact.name));
+        badgeButton.setAllCaps(false);
+        badgeButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        badgeButton.setCheckable(false);
+        badgeButton.setClickable(false);
+        badgeButton.setFocusable(false);
+        badgeButton.setInsetTop(0);
+        badgeButton.setInsetBottom(0);
+        badgeButton.setMinWidth(0);
+        badgeButton.setMinHeight(0);
+        badgeButton.setMinimumWidth(0);
+        badgeButton.setMinimumHeight(0);
+        badgeButton.setPadding(0, 0, 0, 0);
+        badgeButton.setCornerRadius(buttonSize / 2);
+        badgeButton.setStrokeWidth(0);
+        badgeButton.setBackgroundTintList(ColorStateList.valueOf(badgeColor));
+        badgeButton.setTextColor(getParticipantTextColor(badgeColor));
+        badgeButton.setContentDescription(contact.name);
+    }
+
+    private void configureAddParticipantKeyboardBehavior(
+            @NonNull View dialogView,
+            @NonNull TextInputEditText nameInput,
+            @NonNull TextInputEditText phoneInput
+    ) {
+        View.OnFocusChangeListener focusChangeListener = (view, hasFocus) -> {
+            if (hasFocus) {
+                return;
+            }
+
+            dialogView.post(() -> {
+                if (!nameInput.isFocused() && !phoneInput.isFocused()) {
+                    hideKeyboardAndClearFocus((TextInputEditText) view, dialogView);
+                }
+            });
+        };
+
+        nameInput.setOnFocusChangeListener(focusChangeListener);
+        phoneInput.setOnFocusChangeListener(focusChangeListener);
+
+        TextView.OnEditorActionListener editorActionListener = (textView, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_DONE || actionId == EditorInfo.IME_NULL) {
+                hideKeyboardAndClearFocus((TextInputEditText) textView, dialogView);
+                return true;
+            }
+            return false;
+        };
+
+        nameInput.setOnEditorActionListener(editorActionListener);
+        phoneInput.setOnEditorActionListener(editorActionListener);
+    }
+
+    private void hideKeyboardAndClearFocus(
+            @NonNull TextInputEditText inputView,
+            @NonNull View fallbackView
+    ) {
+        clearTextInputFocus(inputView, fallbackView);
     }
 
     private static final class PhoneContact {

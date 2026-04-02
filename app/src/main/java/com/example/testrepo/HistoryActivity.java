@@ -37,7 +37,6 @@ import android.text.style.RelativeSizeSpan;
 public class HistoryActivity extends AppCompatActivity {
     private static final int INITIAL_VISIBLE_HISTORY_COUNT = 5;
     private static final int HISTORY_PAGE_SIZE = 5;
-    private static final int MAX_PARTICIPANT_BUTTONS_PER_ROW = 5;
     private static final int MAX_ITEM_PARTICIPANT_BUTTONS_PER_ROW = 4;
     private static final int UNCHECKED_PARTICIPANT_COLOR = 0xFF8A8A8A;
     private static final String DEFAULT_PARTICIPANT_KEY = "participant_you";
@@ -186,60 +185,53 @@ public class HistoryActivity extends AppCompatActivity {
             return;
         }
 
-        int buttonSize = dpToPx(52);
-        int buttonSpacing = dpToPx(6);
-        int rowSpacing = dpToPx(8);
-
-        LinearLayout currentRow = null;
         for (int index = 0; index < participants.size(); index++) {
-            if (index % MAX_PARTICIPANT_BUTTONS_PER_ROW == 0) {
-                currentRow = new LinearLayout(this);
-                LinearLayout.LayoutParams rowLayoutParams = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-                if (index > 0) {
-                    rowLayoutParams.topMargin = rowSpacing;
-                }
-                currentRow.setLayoutParams(rowLayoutParams);
-                currentRow.setOrientation(LinearLayout.HORIZONTAL);
-                currentRow.setGravity(Gravity.CENTER_HORIZONTAL);
-                participantsLayout.addView(currentRow);
-            }
+            ReceiptHistoryStore.ParticipantShare participant = participants.get(index);
+            View rowView = LayoutInflater.from(this).inflate(
+                    R.layout.item_receipt_summary_participant,
+                    participantsLayout,
+                    false
+            );
+            MaterialButton badgeButton = rowView.findViewById(R.id.button_summary_participant_badge);
+            TextView nameView = rowView.findViewById(R.id.text_summary_participant_name);
+            TextView amountView = rowView.findViewById(R.id.text_summary_participant_amount);
+            View dividerView = rowView.findViewById(R.id.view_summary_participant_divider);
 
-            if (currentRow != null) {
-                currentRow.addView(
-                        createHistoryParticipantBadgeButton(
-                                entry,
-                                participants.get(index),
-                                buttonSize,
-                                buttonSpacing
-                        )
-                );
-            }
+            configureHistoryParticipantBadgeButton(badgeButton, participant, true);
+            nameView.setText(participant.name);
+            amountView.setText(
+                    buildHistoryParticipantTotalDisplayText(participant.amount, entry.totalAmount)
+            );
+            dividerView.setVisibility(index == participants.size() - 1 ? View.GONE : View.VISIBLE);
+
+            View.OnClickListener openDetailsListener =
+                    view -> showHistoryParticipantDetailsDialog(participant, entry.totalAmount);
+            rowView.setOnClickListener(openDetailsListener);
+            badgeButton.setOnClickListener(openDetailsListener);
+            participantsLayout.addView(rowView);
         }
     }
 
-    @NonNull
-    private MaterialButton createHistoryParticipantBadgeButton(
-            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+    private void configureHistoryParticipantBadgeButton(
+            @NonNull MaterialButton participantButton,
             @NonNull ReceiptHistoryStore.ParticipantShare participant,
-            int buttonSize,
-            int buttonSpacing
+            boolean clickable
     ) {
-        MaterialButton participantButton = new MaterialButton(this);
-        LinearLayout.LayoutParams layoutParams =
-                new LinearLayout.LayoutParams(buttonSize, buttonSize);
-        layoutParams.setMargins(buttonSpacing, 0, buttonSpacing, 0);
-        participantButton.setLayoutParams(layoutParams);
+        int buttonSize = dpToPx(52);
+        ViewGroup.LayoutParams layoutParams = participantButton.getLayoutParams();
+        if (layoutParams != null) {
+            layoutParams.width = buttonSize;
+            layoutParams.height = buttonSize;
+            participantButton.setLayoutParams(layoutParams);
+        }
         participantButton.setText(getParticipantBadgeLabel(participant));
         participantButton.setAllCaps(false);
         participantButton.setTextSize(
                 TypedValue.COMPLEX_UNIT_SP,
                 getParticipantBadgeTextSizeSp(participant, false)
         );
-        participantButton.setClickable(true);
-        participantButton.setFocusable(true);
+        participantButton.setClickable(clickable);
+        participantButton.setFocusable(clickable);
         participantButton.setEnabled(true);
         participantButton.setInsetTop(0);
         participantButton.setInsetBottom(0);
@@ -253,10 +245,6 @@ public class HistoryActivity extends AppCompatActivity {
         participantButton.setBackgroundTintList(ColorStateList.valueOf(participant.color));
         participantButton.setTextColor(getParticipantTextColor(participant.color));
         participantButton.setContentDescription(participant.name);
-        participantButton.setOnClickListener(
-                view -> showHistoryParticipantDetailsDialog(participant, entry.totalAmount)
-        );
-        return participantButton;
     }
 
     private void bindHistoryReceiptItems(

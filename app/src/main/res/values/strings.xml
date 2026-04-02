@@ -60,6 +60,7 @@
     <string name="loading_phone_contacts">Loading phone contacts...</string>
     <string name="phone_contacts_permission_required">Allow contacts permission to load phone contacts.</string>
     <string name="no_phone_contacts">No phone contacts found.</string>
+    <string name="no_matching_phone_contacts">No matching contacts found.</string>
     <string name="participant_added">Participant added.</string>
     <string name="participant_already_added">Participant already added.</string>
     <string name="participant_total_label">Total to pay</string>
