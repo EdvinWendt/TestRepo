@@ -27,6 +27,7 @@ final class ReceiptHistoryStore {
     private static final String KEY_PARTICIPANT_INITIALS = "initials";
     private static final String KEY_PARTICIPANT_COLOR = "color";
     private static final String KEY_PARTICIPANT_PHONE = "phone";
+    private static final String KEY_PARTICIPANT_IS_CROWNED = "is_crowned";
     private static final String KEY_ITEM_NAME = "name";
     private static final String KEY_ITEM_PRICE = "price";
     private static final String KEY_ITEM_SELECTED_PARTICIPANT_KEYS = "selected_participant_keys";
@@ -169,6 +170,7 @@ final class ReceiptHistoryStore {
         final int color;
         final String phoneNumber;
         final String amount;
+        final boolean isCrowned;
 
         ParticipantShare(
                 @NonNull String key,
@@ -176,7 +178,8 @@ final class ReceiptHistoryStore {
                 @NonNull String initials,
                 int color,
                 @NonNull String phoneNumber,
-                @NonNull String amount
+                @NonNull String amount,
+                boolean isCrowned
         ) {
             this.key = key;
             this.name = name;
@@ -184,6 +187,7 @@ final class ReceiptHistoryStore {
             this.color = color;
             this.phoneNumber = phoneNumber;
             this.amount = amount;
+            this.isCrowned = isCrowned;
         }
 
         @NonNull
@@ -196,6 +200,7 @@ final class ReceiptHistoryStore {
                 object.put(KEY_PARTICIPANT_COLOR, color);
                 object.put(KEY_PARTICIPANT_PHONE, phoneNumber);
                 object.put(KEY_PARTICIPANT_AMOUNT, amount);
+                object.put(KEY_PARTICIPANT_IS_CROWNED, isCrowned);
             } catch (JSONException exception) {
                 throw new IllegalStateException("Unable to serialize participant share", exception);
             }
@@ -216,7 +221,8 @@ final class ReceiptHistoryStore {
                             ? object.optInt(KEY_PARTICIPANT_COLOR)
                             : createParticipantColor(fallbackIndex),
                     object.optString(KEY_PARTICIPANT_PHONE, ""),
-                    object.optString(KEY_PARTICIPANT_AMOUNT, "")
+                    object.optString(KEY_PARTICIPANT_AMOUNT, ""),
+                    object.optBoolean(KEY_PARTICIPANT_IS_CROWNED, false)
             );
         }
     }

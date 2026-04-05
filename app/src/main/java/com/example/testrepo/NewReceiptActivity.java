@@ -152,6 +152,8 @@ public class NewReceiptActivity extends AppCompatActivity {
     private String currentReceiptName = "";
     @NonNull
     private String pendingSendRequestsMessage = "";
+    @NonNull
+    private String crownedParticipantKey = DEFAULT_PARTICIPANT_KEY;
     @Nullable
     private Intent lastSharedReceiptIntent;
     @Nullable
@@ -1016,27 +1018,20 @@ public class NewReceiptActivity extends AppCompatActivity {
         try {
             inputImage = InputImage.fromFilePath(this, Uri.fromFile(imageFile));
         } catch (IOException exception) {
-            onReceiptNotDetected();
+            showCropEditor(imageFile, 0f);
             return;
         }
 
         textRecognizer.process(inputImage)
                 .addOnSuccessListener(recognizedText -> handleInitialRecognition(imageFile, recognizedText))
-                .addOnFailureListener(exception -> onReceiptNotDetected());
+                .addOnFailureListener(exception -> showCropEditor(imageFile, 0f));
     }
 
     private void handleInitialRecognition(File imageFile, Text recognizedText) {
-        ArrayList<String> lines = extractRecognizedLines(recognizedText);
-        ArrayList<ReceiptParser.ReceiptItem> detectedItems = receiptParser.extractReceiptItems(lines);
-
-        if (receiptParser.isReceiptDetected(lines, detectedItems)) {
-            float autoRotateDegrees = AppSettings.isAutoRotateImageEnabled(this)
-                    ? computeReceiptAlignmentRotationDegrees(recognizedText)
-                    : 0f;
-            showCropEditor(imageFile, autoRotateDegrees);
-        } else {
-            onReceiptNotDetected();
-        }
+        float autoRotateDegrees = AppSettings.isAutoRotateImageEnabled(this)
+                ? computeReceiptAlignmentRotationDegrees(recognizedText)
+                : 0f;
+        showCropEditor(imageFile, autoRotateDegrees);
     }
 
     private void showCropEditor(File imageFile, float autoRotateDegrees) {
@@ -1173,12 +1168,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     private void handleCroppedRecognition(Text recognizedText) {
         ArrayList<String> lines = extractRecognizedLines(recognizedText);
         ArrayList<ReceiptParser.ReceiptItem> detectedItems = receiptParser.extractReceiptItems(lines);
-
-        if (receiptParser.isReceiptDetected(lines, detectedItems) && !detectedItems.isEmpty()) {
-            showReceiptResults(detectedItems);
-        } else {
-            onCroppedReceiptNotDetected();
-        }
+        showReceiptResults(detectedItems);
     }
 
     private ArrayList<String> extractRecognizedLines(Text recognizedText) {
@@ -1957,6 +1947,7 @@ public class NewReceiptActivity extends AppCompatActivity {
                 getParticipantInitials(DEFAULT_PARTICIPANT_NAME),
                 createParticipantColor(participants.size())
         ));
+        crownedParticipantKey = DEFAULT_PARTICIPANT_KEY;
     }
 
     private void applyPreAddedParticipants() {
@@ -2223,7 +2214,12 @@ public class NewReceiptActivity extends AppCompatActivity {
         participantButton.setMinimumHeight(0);
         participantButton.setPadding(0, 0, 0, 0);
         participantButton.setCornerRadius(buttonSize / 2);
-        participantButton.setStrokeWidth(0);
+        if (isCrownedParticipant(participant)) {
+            participantButton.setStrokeWidth(dpToPx(2));
+            participantButton.setStrokeColor(ColorStateList.valueOf(Color.WHITE));
+        } else {
+            participantButton.setStrokeWidth(0);
+        }
         participantButton.setBackgroundTintList(ColorStateList.valueOf(participant.color));
         participantButton.setTextColor(getParticipantTextColor(participant.color));
         participantButton.setContentDescription(participant.name);
@@ -2252,6 +2248,8 @@ public class NewReceiptActivity extends AppCompatActivity {
         TextView participantNameView = dialogView.findViewById(R.id.text_participant_detail_name);
         TextView participantPhoneView = dialogView.findViewById(R.id.text_participant_detail_phone);
         TextView participantTotalView = dialogView.findViewById(R.id.text_participant_detail_total);
+        AppCompatImageButton crownToggleButton =
+                dialogView.findViewById(R.id.button_participant_crown);
         MaterialButton removeParticipantButton =
                 dialogView.findViewById(R.id.button_remove_participant);
         MaterialButton toggleParticipantItemsButton =
@@ -2268,6 +2266,17 @@ public class NewReceiptActivity extends AppCompatActivity {
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setView(dialogView)
                 .create();
+
+        updateParticipantCrownButton(crownToggleButton, participant);
+        crownToggleButton.setOnClickListener(view -> {
+            if (isCrownedParticipant(participant)) {
+                return;
+            }
+
+            setCrownedParticipant(participant);
+            updateParticipantCrownButton(crownToggleButton, participant);
+            refreshParticipantButtons();
+        });
 
         boolean canRemoveParticipant = !isDefaultParticipant(participant);
         removeParticipantButton.setEnabled(canRemoveParticipant);
@@ -2418,7 +2427,12 @@ public class NewReceiptActivity extends AppCompatActivity {
         badgeButton.setMinimumHeight(0);
         badgeButton.setPadding(0, 0, 0, 0);
         badgeButton.setCornerRadius(buttonSize / 2);
-        badgeButton.setStrokeWidth(0);
+        if (isCrownedParticipant(participant)) {
+            badgeButton.setStrokeWidth(dpToPx(2));
+            badgeButton.setStrokeColor(ColorStateList.valueOf(Color.WHITE));
+        } else {
+            badgeButton.setStrokeWidth(0);
+        }
         badgeButton.setBackgroundTintList(ColorStateList.valueOf(participant.color));
         badgeButton.setTextColor(getParticipantTextColor(participant.color));
         badgeButton.setContentDescription(participant.name);
@@ -2728,7 +2742,8 @@ public class NewReceiptActivity extends AppCompatActivity {
                     participant.initials,
                     participant.color,
                     participant.phoneNumber,
-                    formatCurrency(participantTotal)
+                    formatCurrency(participantTotal),
+                    isCrownedParticipant(participant)
             ));
         }
         return participantShares;
@@ -2785,6 +2800,9 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     private void removeParticipant(Participant participant) {
+        if (isCrownedParticipant(participant)) {
+            crownedParticipantKey = DEFAULT_PARTICIPANT_KEY;
+        }
         participants.remove(participant);
         for (ReceiptParser.ReceiptItem item : receiptItems) {
             item.deselectParticipant(participant.key);
@@ -2899,6 +2917,29 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private boolean isDefaultParticipant(Participant participant) {
         return DEFAULT_PARTICIPANT_KEY.equals(participant.key);
+    }
+
+    private boolean isCrownedParticipant(@NonNull Participant participant) {
+        return participant.key.equals(crownedParticipantKey);
+    }
+
+    private void setCrownedParticipant(@NonNull Participant participant) {
+        crownedParticipantKey = participant.key;
+    }
+
+    private void updateParticipantCrownButton(
+            @NonNull AppCompatImageButton crownButton,
+            @NonNull Participant participant
+    ) {
+        boolean isSelected = isCrownedParticipant(participant);
+        crownButton.setImageResource(isSelected ? R.drawable.crown_true : R.drawable.crown_false);
+        crownButton.setContentDescription(
+                getString(
+                        isSelected
+                                ? R.string.participant_crown_selected
+                                : R.string.participant_crown_unselected
+                )
+        );
     }
 
     private String getParticipantBadgeLabel(Participant participant) {

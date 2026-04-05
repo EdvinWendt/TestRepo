@@ -8,13 +8,30 @@
     android:paddingEnd="@dimen/dialog_horizontal_padding"
     android:paddingBottom="@dimen/dialog_vertical_padding">
 
-    <TextView
-        android:id="@+id/text_participant_detail_name"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:textAppearance="?attr/textAppearanceHeadlineSmall"
-        android:textStyle="bold" />
+        android:layout_marginBottom="8dp">
+
+        <TextView
+            android:id="@+id/text_participant_detail_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingEnd="56dp"
+            android:textAppearance="?attr/textAppearanceHeadlineSmall"
+            android:textStyle="bold" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/button_participant_crown"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_gravity="top|end"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/participant_crown_unselected"
+            android:padding="4dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/crown_false" />
+    </FrameLayout>
 
     <TextView
         android:id="@+id/text_participant_detail_phone"

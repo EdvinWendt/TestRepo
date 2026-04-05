@@ -20,6 +20,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.AppCompatImageButton;
 import androidx.core.content.ContextCompat;
 
 import com.google.android.material.button.MaterialButton;
@@ -241,7 +242,12 @@ public class HistoryActivity extends AppCompatActivity {
         participantButton.setMinimumHeight(0);
         participantButton.setPadding(0, 0, 0, 0);
         participantButton.setCornerRadius(buttonSize / 2);
-        participantButton.setStrokeWidth(0);
+        if (isCrownedParticipant(participant)) {
+            participantButton.setStrokeWidth(dpToPx(2));
+            participantButton.setStrokeColor(ColorStateList.valueOf(Color.WHITE));
+        } else {
+            participantButton.setStrokeWidth(0);
+        }
         participantButton.setBackgroundTintList(ColorStateList.valueOf(participant.color));
         participantButton.setTextColor(getParticipantTextColor(participant.color));
         participantButton.setContentDescription(participant.name);
@@ -386,6 +392,8 @@ public class HistoryActivity extends AppCompatActivity {
         TextView participantNameView = dialogView.findViewById(R.id.text_participant_detail_name);
         TextView participantPhoneView = dialogView.findViewById(R.id.text_participant_detail_phone);
         TextView participantTotalView = dialogView.findViewById(R.id.text_participant_detail_total);
+        AppCompatImageButton crownToggleButton =
+                dialogView.findViewById(R.id.button_participant_crown);
         MaterialButton removeParticipantButton =
                 dialogView.findViewById(R.id.button_remove_participant);
         MaterialButton toggleParticipantItemsButton =
@@ -399,6 +407,19 @@ public class HistoryActivity extends AppCompatActivity {
         );
         participantTotalView.setText(
                 buildHistoryParticipantTotalDisplayText(participant.amount, receiptTotalAmount)
+        );
+        crownToggleButton.setVisibility(View.VISIBLE);
+        crownToggleButton.setImageResource(
+                isCrownedParticipant(participant) ? R.drawable.crown_true : R.drawable.crown_false
+        );
+        crownToggleButton.setClickable(false);
+        crownToggleButton.setFocusable(false);
+        crownToggleButton.setContentDescription(
+                getString(
+                        isCrownedParticipant(participant)
+                                ? R.string.participant_crown_selected
+                                : R.string.participant_crown_unselected
+                )
         );
         removeParticipantButton.setVisibility(View.GONE);
         toggleParticipantItemsButton.setVisibility(View.GONE);
@@ -476,6 +497,12 @@ public class HistoryActivity extends AppCompatActivity {
     private boolean isDefaultParticipant(@NonNull ReceiptHistoryStore.ParticipantShare participant) {
         return DEFAULT_PARTICIPANT_KEY.equals(participant.key)
                 || DEFAULT_PARTICIPANT_NAME.equalsIgnoreCase(normalizeWhitespace(participant.name));
+    }
+
+    private boolean isCrownedParticipant(
+            @NonNull ReceiptHistoryStore.ParticipantShare participant
+    ) {
+        return participant.isCrowned;
     }
 
     @NonNull

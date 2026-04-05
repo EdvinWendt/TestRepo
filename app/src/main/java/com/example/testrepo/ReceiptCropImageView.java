@@ -52,7 +52,7 @@ public class ReceiptCropImageView extends View {
         handlePaint.setColor(Color.WHITE);
         handlePaint.setStyle(Paint.Style.FILL);
 
-        minCropSizePx = dpToPx(96f);
+        minCropSizePx = dpToPx(48f);
         handleRadiusPx = dpToPx(10f);
         touchTargetPx = dpToPx(28f);
     }

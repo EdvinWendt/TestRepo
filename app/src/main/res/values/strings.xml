@@ -65,6 +65,8 @@
     <string name="participant_already_added">Participant already added.</string>
     <string name="participant_total_label">Total to pay</string>
     <string name="participant_phone_unavailable">Phone number unavailable</string>
+    <string name="participant_crown_selected">Primary participant selected</string>
+    <string name="participant_crown_unselected">Select primary participant</string>
     <string name="next">Next</string>
     <string name="refresh">Refresh</string>
     <string name="refresh_unavailable">Unable to refresh this receipt.</string>
