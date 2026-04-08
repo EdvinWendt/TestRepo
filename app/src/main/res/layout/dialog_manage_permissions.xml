@@ -7,7 +7,6 @@
     android:orientation="vertical">
 
     <RelativeLayout
-        android:id="@+id/layout_settings_header"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="?attr/colorPrimary"
@@ -18,7 +17,7 @@
         android:paddingBottom="12dp">
 
         <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/button_close_settings"
+            android:id="@+id/button_close_manage_permissions"
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:layout_alignParentStart="true"
@@ -34,7 +33,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_centerInParent="true"
-            android:text="@string/settings"
+            android:text="@string/manage_permissions_title"
             android:textAppearance="?attr/textAppearanceTitleLarge"
             android:textColor="@android:color/white"
             android:textStyle="bold" />
@@ -83,71 +82,22 @@
                             <TextView
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="@string/settings_auto_rotate_image_title"
+                                android:text="@string/permission_contacts_title"
                                 android:textAppearance="?attr/textAppearanceTitleMedium"
                                 android:textColor="@android:color/white"
                                 android:textStyle="bold" />
 
                             <TextView
+                                android:id="@+id/text_permissions_contacts_description"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="6dp"
-                                android:text="@string/settings_auto_rotate_image_description"
-                                android:textAppearance="?attr/textAppearanceBodyMedium"
-                                android:textColor="#B3B3B3" />
-                        </LinearLayout>
-
-                        <com.google.android.material.materialswitch.MaterialSwitch
-                            android:id="@+id/switch_auto_rotate_image"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="top"
-                            android:layout_marginStart="16dp"
-                            android:minWidth="0dp"
-                            android:minHeight="0dp"
-                            android:text="" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:layout_marginTop="18dp"
-                        android:background="#33FFFFFF" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:minHeight="84dp"
-                        android:orientation="horizontal"
-                        android:paddingStart="20dp"
-                        android:paddingTop="18dp"
-                        android:paddingEnd="20dp">
-
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="@string/settings_permissions_title"
-                                android:textAppearance="?attr/textAppearanceTitleMedium"
-                                android:textColor="@android:color/white"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="6dp"
-                                android:text="@string/settings_permissions_description"
                                 android:textAppearance="?attr/textAppearanceBodyMedium"
                                 android:textColor="#B3B3B3" />
                         </LinearLayout>
 
                         <com.google.android.material.button.MaterialButton
-                            android:id="@+id/button_manage_permissions"
+                            android:id="@+id/button_manage_contacts_permission"
                             style="@style/Widget.Material3.Button.OutlinedButton"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
@@ -181,71 +131,22 @@
                             <TextView
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="@string/settings_split_items_title"
+                                android:text="@string/permission_camera_title"
                                 android:textAppearance="?attr/textAppearanceTitleMedium"
                                 android:textColor="@android:color/white"
                                 android:textStyle="bold" />
 
                             <TextView
+                                android:id="@+id/text_permissions_camera_description"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="6dp"
-                                android:text="@string/settings_split_items_description"
-                                android:textAppearance="?attr/textAppearanceBodyMedium"
-                                android:textColor="#B3B3B3" />
-                        </LinearLayout>
-
-                        <com.google.android.material.materialswitch.MaterialSwitch
-                            android:id="@+id/switch_split_items"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="top"
-                            android:layout_marginStart="16dp"
-                            android:minWidth="0dp"
-                            android:minHeight="0dp"
-                            android:text="" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:layout_marginTop="18dp"
-                        android:background="#33FFFFFF" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:minHeight="84dp"
-                        android:orientation="horizontal"
-                        android:paddingStart="20dp"
-                        android:paddingTop="18dp"
-                        android:paddingEnd="20dp">
-
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="@string/settings_pre_added_participants_title"
-                                android:textAppearance="?attr/textAppearanceTitleMedium"
-                                android:textColor="@android:color/white"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="6dp"
-                                android:text="@string/settings_pre_added_participants_description"
                                 android:textAppearance="?attr/textAppearanceBodyMedium"
                                 android:textColor="#B3B3B3" />
                         </LinearLayout>
 
                         <com.google.android.material.button.MaterialButton
-                            android:id="@+id/button_manage_pre_added_participants"
+                            android:id="@+id/button_manage_camera_permission"
                             style="@style/Widget.Material3.Button.OutlinedButton"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
@@ -279,32 +180,30 @@
                             <TextView
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="@string/settings_username_nickname_title"
+                                android:text="@string/permission_sms_title"
                                 android:textAppearance="?attr/textAppearanceTitleMedium"
                                 android:textColor="@android:color/white"
                                 android:textStyle="bold" />
 
                             <TextView
-                                android:id="@+id/text_settings_username_description"
+                                android:id="@+id/text_permissions_sms_description"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="6dp"
-                                android:text="@string/settings_username_description"
                                 android:textAppearance="?attr/textAppearanceBodyMedium"
                                 android:textColor="#B3B3B3" />
                         </LinearLayout>
 
                         <com.google.android.material.button.MaterialButton
-                            android:id="@+id/button_edit_username_nickname"
+                            android:id="@+id/button_manage_sms_permission"
                             style="@style/Widget.Material3.Button.OutlinedButton"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_gravity="top"
                             android:layout_marginStart="16dp"
                             android:minWidth="0dp"
-                            android:text="@string/edit" />
+                            android:text="@string/manage" />
                     </LinearLayout>
-
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>

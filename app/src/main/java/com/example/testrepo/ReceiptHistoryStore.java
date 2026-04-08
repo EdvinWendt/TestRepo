@@ -38,15 +38,40 @@ final class ReceiptHistoryStore {
     static void saveEntry(@NonNull Context context, @NonNull HistoryEntry entry) {
         ArrayList<HistoryEntry> entries = loadEntries(context);
         entries.add(0, entry);
+        saveEntries(context, entries);
+    }
 
+    static boolean removeEntry(@NonNull Context context, @NonNull HistoryEntry targetEntry) {
+        ArrayList<HistoryEntry> entries = loadEntries(context);
+        for (int index = 0; index < entries.size(); index++) {
+            if (entries.get(index).matches(targetEntry)) {
+                entries.remove(index);
+                saveEntries(context, entries);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void saveEntries(
+            @NonNull Context context,
+            @NonNull List<HistoryEntry> entries
+    ) {
         JSONArray serializedEntries = new JSONArray();
-        for (HistoryEntry existingEntry : entries) {
-            serializedEntries.put(existingEntry.toJson());
+        for (HistoryEntry entry : entries) {
+            serializedEntries.put(entry.toJson());
         }
 
         getPreferences(context)
                 .edit()
                 .putString(KEY_ENTRIES, serializedEntries.toString())
+                .apply();
+    }
+
+    static void clearHistory(@NonNull Context context) {
+        getPreferences(context)
+                .edit()
+                .remove(KEY_ENTRIES)
                 .apply();
     }
 
@@ -161,6 +186,31 @@ final class ReceiptHistoryStore {
                     items
             );
         }
+
+        private boolean matches(@NonNull HistoryEntry other) {
+            if (!receiptName.equals(other.receiptName)
+                    || !totalAmount.equals(other.totalAmount)
+                    || !sentDate.equals(other.sentDate)
+                    || !message.equals(other.message)
+                    || participants.size() != other.participants.size()
+                    || items.size() != other.items.size()) {
+                return false;
+            }
+
+            for (int index = 0; index < participants.size(); index++) {
+                if (!participants.get(index).matches(other.participants.get(index))) {
+                    return false;
+                }
+            }
+
+            for (int index = 0; index < items.size(); index++) {
+                if (!items.get(index).matches(other.items.get(index))) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
     }
 
     static final class ParticipantShare {
@@ -225,6 +275,16 @@ final class ReceiptHistoryStore {
                     object.optBoolean(KEY_PARTICIPANT_IS_CROWNED, false)
             );
         }
+
+        private boolean matches(@NonNull ParticipantShare other) {
+            return key.equals(other.key)
+                    && name.equals(other.name)
+                    && initials.equals(other.initials)
+                    && color == other.color
+                    && phoneNumber.equals(other.phoneNumber)
+                    && amount.equals(other.amount)
+                    && isCrowned == other.isCrowned;
+        }
     }
 
     static final class HistoryItem {
@@ -282,6 +342,23 @@ final class ReceiptHistoryStore {
 
         boolean isParticipantSelected(@NonNull String participantKey) {
             return selectedParticipantKeys.contains(participantKey);
+        }
+
+        private boolean matches(@NonNull HistoryItem other) {
+            if (!name.equals(other.name)
+                    || !price.equals(other.price)
+                    || selectedParticipantKeys.size() != other.selectedParticipantKeys.size()) {
+                return false;
+            }
+
+            for (int index = 0; index < selectedParticipantKeys.size(); index++) {
+                if (!selectedParticipantKeys.get(index)
+                        .equals(other.selectedParticipantKeys.get(index))) {
+                    return false;
+                }
+            }
+
+            return true;
         }
     }
 

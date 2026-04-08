@@ -10,6 +10,7 @@
     android:orientation="vertical">
 
     <RelativeLayout
+        android:id="@+id/layout_new_receipt_header"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="?attr/colorPrimary"
@@ -139,31 +140,72 @@
                             android:paddingStart="20dp"
                             android:paddingEnd="20dp">
 
-                            <TextView
-                                android:id="@+id/text_receipt_items_title"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="@string/receipt_items_title"
-                                android:textAppearance="?attr/textAppearanceTitleMedium"
-                                android:textColor="@android:color/white"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:id="@+id/text_add_receipt_item"
+                            <LinearLayout
+                                android:id="@+id/action_add_receipt_item"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:background="?attr/selectableItemBackgroundBorderless"
                                 android:clickable="true"
                                 android:focusable="true"
-                                android:paddingStart="12dp"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingStart="4dp"
+                                android:paddingTop="4dp"
+                                android:paddingEnd="8dp"
+                                android:paddingBottom="4dp">
+
+                                <androidx.appcompat.widget.AppCompatImageView
+                                    android:layout_width="24dp"
+                                    android:layout_height="24dp"
+                                    android:layout_marginEnd="8dp"
+                                    android:tint="?attr/colorPrimary"
+                                    app:srcCompat="@drawable/ic_receipt_add_item_action" />
+
+                                <TextView
+                                    android:id="@+id/text_add_receipt_item"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/add_item"
+                                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                                    android:textColor="?attr/colorPrimary"
+                                    android:textStyle="bold" />
+                            </LinearLayout>
+
+                            <View
+                                android:layout_width="0dp"
+                                android:layout_height="1dp"
+                                android:layout_weight="1" />
+
+                            <LinearLayout
+                                android:id="@+id/action_receipt_filters"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingStart="8dp"
                                 android:paddingTop="4dp"
                                 android:paddingEnd="4dp"
-                                android:paddingBottom="4dp"
-                                android:text="@string/add_item"
-                                android:textAppearance="?attr/textAppearanceBodyMedium"
-                                android:textColor="?attr/colorPrimary"
-                                android:textStyle="bold" />
+                                android:paddingBottom="4dp">
+
+                                <androidx.appcompat.widget.AppCompatImageView
+                                    android:layout_width="24dp"
+                                    android:layout_height="24dp"
+                                    android:layout_marginEnd="8dp"
+                                    android:tint="?attr/colorPrimary"
+                                    app:srcCompat="@drawable/ic_receipt_filters_action" />
+
+                                <TextView
+                                    android:id="@+id/text_receipt_filters"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/filters"
+                                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                                    android:textColor="?attr/colorPrimary"
+                                    android:textStyle="bold" />
+                            </LinearLayout>
                         </LinearLayout>
 
                         <View
@@ -187,34 +229,17 @@
                             android:layout_marginTop="12dp"
                             android:background="#33FFFFFF" />
 
-                        <LinearLayout
+                        <TextView
+                            android:id="@+id/text_receipt_total_value"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal"
                             android:paddingStart="20dp"
                             android:paddingTop="12dp"
-                            android:paddingEnd="20dp">
-
-                            <TextView
-                                android:id="@+id/text_receipt_total_label"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="@string/receipt_total_label"
-                                android:textAppearance="?attr/textAppearanceTitleMedium"
-                                android:textColor="@android:color/white"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:id="@+id/text_receipt_total_value"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="0,00"
-                                android:textAppearance="?attr/textAppearanceTitleMedium"
-                                android:textColor="@android:color/white"
-                                android:textStyle="bold" />
-                        </LinearLayout>
+                            android:paddingEnd="20dp"
+                            android:text="Total: 0,00kr"
+                            android:textAppearance="?attr/textAppearanceTitleMedium"
+                            android:textColor="@android:color/white"
+                            android:textStyle="bold" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 

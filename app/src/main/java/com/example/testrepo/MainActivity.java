@@ -11,6 +11,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        InstallResetHelper.resetInstallScopedDataIfNeeded(this);
         setContentView(R.layout.activity_main);
 
         View settingsMenuButton = findViewById(R.id.button_main_actions);
@@ -23,5 +24,17 @@ public class MainActivity extends AppCompatActivity {
         settingsMenuButton.setOnClickListener(
                 view -> SettingsMenuHelper.showSettingsMenu(this, view)
         );
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        promptForRequiredUsernameIfNeeded();
+    }
+
+    private void promptForRequiredUsernameIfNeeded() {
+        if (AppSettings.isUsernameNicknameEmpty(this)) {
+            EditUsernameDialogFragment.show(getSupportFragmentManager(), true);
+        }
     }
 }

@@ -10,6 +10,7 @@
     android:orientation="vertical">
 
     <RelativeLayout
+        android:id="@+id/layout_receipt_summary_header"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="?attr/colorPrimary"
@@ -83,24 +84,6 @@
                 android:inputType="textCapWords"
                 android:maxLength="20"
                 android:maxLines="1" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/input_layout_receipt_summary_message"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:hint="@string/receipt_summary_message_label"
-            app:counterEnabled="true"
-            app:counterMaxLength="50">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/edit_receipt_summary_message"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="textCapSentences"
-                android:maxLength="50"
-                android:maxLines="2" />
         </com.google.android.material.textfield.TextInputLayout>
 
         <com.google.android.material.button.MaterialButton

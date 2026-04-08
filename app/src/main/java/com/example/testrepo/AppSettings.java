@@ -20,8 +20,10 @@ public final class AppSettings {
     private static final String KEY_AUTO_ROTATE_IMAGE = "auto_rotate_image";
     private static final String KEY_SPLIT_ITEMS = "split_items";
     private static final String KEY_PRE_ADDED_PARTICIPANTS = "pre_added_participants";
+    private static final String KEY_USERNAME_NICKNAME = "username_nickname";
     private static final boolean DEFAULT_AUTO_ROTATE_IMAGE_ENABLED = true;
     private static final boolean DEFAULT_SPLIT_ITEMS_ENABLED = false;
+    private static final String DEFAULT_USERNAME_NICKNAME = "";
     private static final String JSON_KEY_NAME = "name";
     private static final String JSON_KEY_PHONE = "phone";
 
@@ -49,6 +51,33 @@ public final class AppSettings {
         getPreferences(context)
                 .edit()
                 .putBoolean(KEY_SPLIT_ITEMS, enabled)
+                .apply();
+    }
+
+    @NonNull
+    public static String getUsernameNickname(@NonNull Context context) {
+        String storedValue = getPreferences(context).getString(
+                KEY_USERNAME_NICKNAME,
+                DEFAULT_USERNAME_NICKNAME
+        );
+        return normalizeUsernameNickname(storedValue);
+    }
+
+    public static void setUsernameNickname(@NonNull Context context, @Nullable String usernameNickname) {
+        getPreferences(context)
+                .edit()
+                .putString(KEY_USERNAME_NICKNAME, normalizeUsernameNickname(usernameNickname))
+                .apply();
+    }
+
+    public static boolean isUsernameNicknameEmpty(@NonNull Context context) {
+        return getUsernameNickname(context).isEmpty();
+    }
+
+    public static void clearUsernameNickname(@NonNull Context context) {
+        getPreferences(context)
+                .edit()
+                .putString(KEY_USERNAME_NICKNAME, DEFAULT_USERNAME_NICKNAME)
                 .apply();
     }
 
@@ -167,6 +196,15 @@ public final class AppSettings {
     @NonNull
     private static String normalizePhoneNumber(@Nullable String phoneNumber) {
         return normalizeWhitespace(phoneNumber).replaceAll("[^+\\d]", "");
+    }
+
+    @NonNull
+    private static String normalizeUsernameNickname(@Nullable String usernameNickname) {
+        String normalizedValue = normalizeWhitespace(usernameNickname);
+        if (normalizedValue.length() > 20) {
+            return normalizedValue.substring(0, 20).trim();
+        }
+        return normalizedValue;
     }
 
     @NonNull

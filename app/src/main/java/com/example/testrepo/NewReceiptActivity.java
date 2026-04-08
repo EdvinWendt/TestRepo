@@ -26,9 +26,6 @@ import android.os.ParcelFileDescriptor;
 import android.provider.ContactsContract;
 import android.provider.OpenableColumns;
 import android.telephony.SmsManager;
-import android.telephony.SubscriptionInfo;
-import android.telephony.SubscriptionManager;
-import android.telephony.TelephonyManager;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -43,6 +40,7 @@ import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
@@ -69,6 +67,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.graphics.drawable.DrawableCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.widget.TextViewCompat;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -116,6 +115,9 @@ public class NewReceiptActivity extends AppCompatActivity {
     private static final int ACTIONS_MODE_HIDDEN = 0;
     private static final int ACTIONS_MODE_SETTINGS_ONLY = 1;
     private static final int ACTIONS_MODE_RECEIPT = 2;
+    private static final int RECEIPT_FILTER_DEFAULT = 0;
+    private static final int RECEIPT_FILTER_HIGH_TO_LOW = 1;
+    private static final int RECEIPT_FILTER_LOW_TO_HIGH = 2;
     private static final int UNCHECKED_PARTICIPANT_COLOR = 0xFF8A8A8A;
     private static final String DEFAULT_PARTICIPANT_NAME = "You";
     private static final String DEFAULT_PARTICIPANT_KEY = "participant_you";
@@ -145,6 +147,8 @@ public class NewReceiptActivity extends AppCompatActivity {
     private ReceiptItemsAdapter receiptItemsAdapter;
     private int currentScreenTitleResId = R.string.photo_screen_title;
     private int actionsMenuMode = ACTIONS_MODE_HIDDEN;
+    private int receiptItemsFilterMode = RECEIPT_FILTER_DEFAULT;
+    private int nextReceiptItemSourceOrder;
     private boolean participantControlsVisible;
     private boolean sendRequestsAfterSmsPermission;
     private boolean showAddParticipantDialogAfterContactsPermission;
@@ -181,10 +185,6 @@ public class NewReceiptActivity extends AppCompatActivity {
                     showAddParticipantDialog(isGranted);
                 }
             });
-    private final ActivityResultLauncher<String[]> requestPhoneNumberPermissionsLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
-                refreshDefaultParticipantPhoneNumber();
-            });
     private final ActivityResultLauncher<String> requestSendSmsPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
                 if (isGranted && sendRequestsAfterSmsPermission) {
@@ -210,6 +210,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        InstallResetHelper.resetInstallScopedDataIfNeeded(this);
         setContentView(R.layout.activity_new_receipt);
 
         previewView = findViewById(R.id.view_camera_preview);
@@ -223,12 +224,14 @@ public class NewReceiptActivity extends AppCompatActivity {
         receiptItemsList = findViewById(R.id.list_receipt_items);
         receiptTotalValueView = findViewById(R.id.text_receipt_total_value);
         nextButton = findViewById(R.id.button_next);
+        View addReceiptItemAction = findViewById(R.id.action_add_receipt_item);
         TextView addReceiptItemText = findViewById(R.id.text_add_receipt_item);
+        View receiptFiltersAction = findViewById(R.id.action_receipt_filters);
+        TextView receiptFiltersText = findViewById(R.id.text_receipt_filters);
         View backButton = findViewById(R.id.button_back);
         receiptActionsButton = findViewById(R.id.button_receipt_actions);
         captureButton = findViewById(R.id.button_take_picture);
         currentReceiptName = getString(R.string.new_receipt_screen_title);
-
         backgroundExecutor = Executors.newSingleThreadExecutor();
         receiptItemsAdapter = new ReceiptItemsAdapter();
         receiptItemsList.setAdapter(receiptItemsAdapter);
@@ -245,13 +248,16 @@ public class NewReceiptActivity extends AppCompatActivity {
         updateNextButtonState();
         textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         refreshDefaultParticipantPhoneNumber();
-        requestPhoneNumberPermissionsIfNeeded();
 
         addReceiptItemText.setPaintFlags(
                 addReceiptItemText.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG
         );
+        receiptFiltersText.setPaintFlags(
+                receiptFiltersText.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG
+        );
         backButton.setOnClickListener(view -> showAbandonReceiptDialog());
-        addReceiptItemText.setOnClickListener(view -> showAddReceiptItemDialog());
+        addReceiptItemAction.setOnClickListener(view -> showAddReceiptItemDialog());
+        receiptFiltersAction.setOnClickListener(this::showReceiptFiltersMenu);
         receiptActionsButton.setOnClickListener(this::showActiveActionsMenu);
         nextButton.setOnClickListener(view -> showReceiptSummaryDialog());
         captureButton.setOnClickListener(view -> {
@@ -286,6 +292,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
+        promptForRequiredUsernameIfNeeded();
         AppSettings.registerChangeListener(this, settingsChangeListener);
     }
 
@@ -309,6 +316,12 @@ public class NewReceiptActivity extends AppCompatActivity {
                 == PackageManager.PERMISSION_GRANTED;
     }
 
+    private void promptForRequiredUsernameIfNeeded() {
+        if (AppSettings.isUsernameNicknameEmpty(this)) {
+            EditUsernameDialogFragment.show(getSupportFragmentManager(), true);
+        }
+    }
+
     private boolean hasContactsPermission() {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS)
                 == PackageManager.PERMISSION_GRANTED;
@@ -317,30 +330,6 @@ public class NewReceiptActivity extends AppCompatActivity {
     private boolean hasSendSmsPermission() {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS)
                 == PackageManager.PERMISSION_GRANTED;
-    }
-
-    private boolean hasPhoneNumberPermission() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE)
-                == PackageManager.PERMISSION_GRANTED) {
-            return true;
-        }
-
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                && ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_NUMBERS)
-                == PackageManager.PERMISSION_GRANTED;
-    }
-
-    private void requestPhoneNumberPermissionsIfNeeded() {
-        if (hasPhoneNumberPermission()) {
-            return;
-        }
-
-        ArrayList<String> permissions = new ArrayList<>();
-        permissions.add(Manifest.permission.READ_PHONE_STATE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            permissions.add(Manifest.permission.READ_PHONE_NUMBERS);
-        }
-        requestPhoneNumberPermissionsLauncher.launch(permissions.toArray(new String[0]));
     }
 
     private void openAddParticipantDialog() {
@@ -448,6 +437,33 @@ public class NewReceiptActivity extends AppCompatActivity {
             return false;
         });
         popupMenu.show();
+    }
+
+    private void showReceiptFiltersMenu(View anchorView) {
+        PopupMenu popupMenu = new PopupMenu(this, anchorView);
+        popupMenu.inflate(R.menu.menu_receipt_filters);
+        popupMenu.setOnMenuItemClickListener(menuItem -> {
+            int itemId = menuItem.getItemId();
+            if (itemId == R.id.action_receipt_filter_default) {
+                applyReceiptItemsFilter(RECEIPT_FILTER_DEFAULT);
+                return true;
+            }
+            if (itemId == R.id.action_receipt_filter_high_to_low) {
+                applyReceiptItemsFilter(RECEIPT_FILTER_HIGH_TO_LOW);
+                return true;
+            }
+            if (itemId == R.id.action_receipt_filter_low_to_high) {
+                applyReceiptItemsFilter(RECEIPT_FILTER_LOW_TO_HIGH);
+                return true;
+            }
+            return false;
+        });
+        popupMenu.show();
+    }
+
+    private void applyReceiptItemsFilter(int filterMode) {
+        receiptItemsFilterMode = filterMode;
+        reapplyTrackedReceiptItems();
     }
 
     private void tintPopupMenuIcons(@NonNull PopupMenu popupMenu) {
@@ -1349,6 +1365,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     private void showReceiptResults(ArrayList<ReceiptParser.ReceiptItem> detectedItems) {
+        assignSourceOrderToReceiptItems(detectedItems);
         trackedReceiptItems.clear();
         trackedReceiptItems.addAll(cloneReceiptItems(detectedItems));
         reapplyTrackedReceiptItems();
@@ -1373,14 +1390,16 @@ public class NewReceiptActivity extends AppCompatActivity {
             String groupingKey = itemName.toLowerCase(Locale.US);
             ReceiptParser.ReceiptItem groupedItem = groupedItems.get(groupingKey);
             if (groupedItem == null) {
+                ReceiptParser.ReceiptItem newGroupedItem = new ReceiptParser.ReceiptItem(
+                        itemName,
+                        item.getAmountCents(),
+                        item.getSplitQuantity(),
+                        item.getPantAmountCents()
+                );
+                newGroupedItem.setSourceOrder(item.getSourceOrder());
                 groupedItems.put(
                         groupingKey,
-                        new ReceiptParser.ReceiptItem(
-                                itemName,
-                                item.getAmountCents(),
-                                item.getSplitQuantity(),
-                                item.getPantAmountCents()
-                        )
+                        newGroupedItem
                 );
                 continue;
             }
@@ -1398,12 +1417,14 @@ public class NewReceiptActivity extends AppCompatActivity {
 
         ArrayList<ReceiptParser.ReceiptItem> displayItems = new ArrayList<>(groupedItems.size());
         for (ReceiptParser.ReceiptItem groupedItem : groupedItems.values()) {
-            displayItems.add(new ReceiptParser.ReceiptItem(
+            ReceiptParser.ReceiptItem displayItem = new ReceiptParser.ReceiptItem(
                     receiptParser.getGroupedDisplayName(groupedItem),
                     groupedItem.getAmountCents(),
                     groupedItem.getSplitQuantity(),
                     groupedItem.getPantAmountCents()
-            ));
+            );
+            displayItem.setSourceOrder(groupedItem.getSourceOrder());
+            displayItems.add(displayItem);
         }
         return displayItems;
     }
@@ -1421,9 +1442,56 @@ public class NewReceiptActivity extends AppCompatActivity {
             copyParticipantSelections(currentItems, displayItems);
         }
 
+        sortReceiptItemsForDisplay(displayItems);
         receiptItems.clear();
         receiptItems.addAll(displayItems);
         refreshReceiptItems();
+    }
+
+    private void sortReceiptItemsForDisplay(
+            @NonNull ArrayList<ReceiptParser.ReceiptItem> itemsToSort
+    ) {
+        Comparator<ReceiptParser.ReceiptItem> sourceOrderComparator =
+                Comparator.comparingInt(ReceiptParser.ReceiptItem::getSourceOrder);
+
+        if (receiptItemsFilterMode == RECEIPT_FILTER_HIGH_TO_LOW) {
+            itemsToSort.sort((left, right) -> {
+                int amountComparison = Integer.compare(
+                        right.getAmountCents(),
+                        left.getAmountCents()
+                );
+                if (amountComparison != 0) {
+                    return amountComparison;
+                }
+                return Integer.compare(left.getSourceOrder(), right.getSourceOrder());
+            });
+            return;
+        }
+
+        if (receiptItemsFilterMode == RECEIPT_FILTER_LOW_TO_HIGH) {
+            itemsToSort.sort((left, right) -> {
+                int amountComparison = Integer.compare(
+                        left.getAmountCents(),
+                        right.getAmountCents()
+                );
+                if (amountComparison != 0) {
+                    return amountComparison;
+                }
+                return Integer.compare(left.getSourceOrder(), right.getSourceOrder());
+            });
+            return;
+        }
+
+        itemsToSort.sort(sourceOrderComparator);
+    }
+
+    private void assignSourceOrderToReceiptItems(
+            @NonNull ArrayList<ReceiptParser.ReceiptItem> itemsToAssign
+    ) {
+        nextReceiptItemSourceOrder = 0;
+        for (ReceiptParser.ReceiptItem item : itemsToAssign) {
+            item.setSourceOrder(nextReceiptItemSourceOrder++);
+        }
     }
 
     @NonNull
@@ -1484,6 +1552,7 @@ public class NewReceiptActivity extends AppCompatActivity {
     private void clearCurrentReceiptResults() {
         trackedReceiptItems.clear();
         receiptItems.clear();
+        nextReceiptItemSourceOrder = 0;
         refreshReceiptItems();
         receiptResultsLayout.setVisibility(View.GONE);
         cropReceiptLayout.setVisibility(View.GONE);
@@ -1502,7 +1571,9 @@ public class NewReceiptActivity extends AppCompatActivity {
         for (ReceiptParser.ReceiptItem item : receiptItems) {
             totalCents += item.getAmountCents();
         }
-        receiptTotalValueView.setText(receiptParser.formatAmount(totalCents));
+        receiptTotalValueView.setText(
+                getString(R.string.receipt_total_format, receiptParser.formatAmount(totalCents))
+        );
     }
 
     private void updateNextButtonState() {
@@ -1562,7 +1633,7 @@ public class NewReceiptActivity extends AppCompatActivity {
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(view -> {
                 receiptItems.remove(item);
                 syncTrackedReceiptItemsToCurrentItems();
-                refreshReceiptItems();
+                reapplyTrackedReceiptItems();
                 dialog.dismiss();
             });
 
@@ -1592,7 +1663,7 @@ public class NewReceiptActivity extends AppCompatActivity {
                 item.setName(itemName);
                 item.setAmountCents(updatedAmountCents);
                 syncTrackedReceiptItemsToCurrentItems();
-                refreshReceiptItems();
+                reapplyTrackedReceiptItems();
                 dialog.dismiss();
             });
         });
@@ -1656,20 +1727,26 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private void addReceiptItem(@NonNull String itemName, int amountCents) {
         ReceiptParser.ReceiptItem item = new ReceiptParser.ReceiptItem(itemName, amountCents);
+        item.setSourceOrder(nextReceiptItemSourceOrder++);
         selectAllParticipantsForItem(item);
         receiptItems.add(item);
         syncTrackedReceiptItemsToCurrentItems();
-        refreshReceiptItems();
+        reapplyTrackedReceiptItems();
         showReceiptResultsUi();
     }
 
     private void syncTrackedReceiptItemsToCurrentItems() {
         trackedReceiptItems.clear();
-        for (ReceiptParser.ReceiptItem item : receiptItems) {
+        ArrayList<ReceiptParser.ReceiptItem> sortedItems = cloneReceiptItems(receiptItems);
+        sortedItems.sort(Comparator.comparingInt(ReceiptParser.ReceiptItem::getSourceOrder));
+        int highestSourceOrder = -1;
+        for (ReceiptParser.ReceiptItem item : sortedItems) {
             ReceiptParser.ReceiptItem trackedItem = item.copy();
             trackedItem.setName(receiptParser.getCanonicalItemName(trackedItem.getName()));
             trackedReceiptItems.add(trackedItem);
+            highestSourceOrder = Math.max(highestSourceOrder, trackedItem.getSourceOrder());
         }
+        nextReceiptItemSourceOrder = highestSourceOrder + 1;
     }
 
     private void applyDialogAnimations(@NonNull AlertDialog dialog) {
@@ -1692,15 +1769,15 @@ public class NewReceiptActivity extends AppCompatActivity {
         MaterialButton addParticipantButton =
                 dialogView.findViewById(R.id.button_add_participant_confirm);
 
-        ArrayList<PhoneContact> phoneContacts = new ArrayList<>();
+        ArrayList<PhoneContactsListItem> phoneContactRows = new ArrayList<>();
         ArrayList<PhoneContact> allPhoneContacts = new ArrayList<>();
         boolean[] contactsLoading = new boolean[]{contactsPermissionGranted};
-        PhoneContactsAdapter phoneContactsAdapter = new PhoneContactsAdapter(phoneContacts);
+        PhoneContactsAdapter phoneContactsAdapter = new PhoneContactsAdapter(phoneContactRows);
         phoneContactsList.setAdapter(phoneContactsAdapter);
         phoneContactsList.setEmptyView(emptyContactsView);
         addParticipantButton.setEnabled(false);
         phoneContactsList.setOnItemClickListener((parent, view, position, id) -> {
-            PhoneContact selectedContact = phoneContactsAdapter.getItem(position);
+            PhoneContact selectedContact = phoneContactsAdapter.getContact(position);
             if (selectedContact == null) {
                 return;
             }
@@ -1741,7 +1818,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         };
         nameInput.addTextChangedListener(validationWatcher);
         phoneInput.addTextChangedListener(validationWatcher);
-        configureAddParticipantKeyboardBehavior(dialogView, nameInput, phoneInput);
+        configureAddParticipantKeyboardBehavior(dialogView, nameLayout, nameInput, phoneInput);
         updateAddParticipantButtonState(
                 nameLayout,
                 phoneLayout,
@@ -1795,6 +1872,13 @@ public class NewReceiptActivity extends AppCompatActivity {
                     ViewGroup.LayoutParams.MATCH_PARENT
             );
         }
+        installAddParticipantKeyboardDismissWatcher(
+                dialog,
+                dialogView,
+                nameLayout,
+                nameInput,
+                phoneInput
+        );
 
         if (!contactsPermissionGranted) {
             updateVisiblePhoneContacts(
@@ -1870,7 +1954,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         }
 
         phoneContactsAdapter.clear();
-        phoneContactsAdapter.addAll(filteredContacts);
+        phoneContactsAdapter.addAll(buildPhoneContactRows(filteredContacts));
         phoneContactsAdapter.notifyDataSetChanged();
 
         if (allPhoneContacts.isEmpty()) {
@@ -1880,6 +1964,35 @@ public class NewReceiptActivity extends AppCompatActivity {
         } else {
             emptyContactsView.setText("");
         }
+    }
+
+    @NonNull
+    private ArrayList<PhoneContactsListItem> buildPhoneContactRows(
+            @NonNull List<PhoneContact> contacts
+    ) {
+        ArrayList<PhoneContactsListItem> rows = new ArrayList<>();
+        String previousSectionLabel = "";
+        for (PhoneContact contact : contacts) {
+            String sectionLabel = getPhoneContactSectionLabel(contact.name);
+            if (!sectionLabel.equals(previousSectionLabel)) {
+                rows.add(PhoneContactsListItem.createSection(sectionLabel));
+                previousSectionLabel = sectionLabel;
+            }
+            rows.add(PhoneContactsListItem.createContact(contact));
+        }
+        return rows;
+    }
+
+    @NonNull
+    private String getPhoneContactSectionLabel(@Nullable String contactName) {
+        String normalizedName = normalizeWhitespace(contactName);
+        if (normalizedName.isEmpty()) {
+            return "#";
+        }
+
+        String firstCharacter = normalizedName.substring(0, 1).toUpperCase(Locale.getDefault());
+        char firstChar = firstCharacter.charAt(0);
+        return Character.isLetter(firstChar) ? firstCharacter : "#";
     }
 
     private ArrayList<PhoneContact> loadPhoneContactsFromDevice() {
@@ -1973,58 +2086,9 @@ public class NewReceiptActivity extends AppCompatActivity {
         }
 
         backgroundExecutor.execute(() -> {
-            String phoneNumber = loadDevicePhoneNumber();
+            String phoneNumber = loadPhoneNumberFromOwnerProfile();
             runOnUiThread(() -> updateDefaultParticipantPhoneNumber(phoneNumber));
         });
-    }
-
-    private String loadDevicePhoneNumber() {
-        String phoneNumber = loadPhoneNumberFromTelephony();
-        if (!phoneNumber.isEmpty()) {
-            return phoneNumber;
-        }
-        return loadPhoneNumberFromOwnerProfile();
-    }
-
-    private String loadPhoneNumberFromTelephony() {
-        if (!hasPhoneNumberPermission()) {
-            return "";
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            SubscriptionManager subscriptionManager = getSystemService(SubscriptionManager.class);
-            if (subscriptionManager != null) {
-                try {
-                    java.util.List<SubscriptionInfo> subscriptions =
-                            subscriptionManager.getActiveSubscriptionInfoList();
-                    if (subscriptions != null) {
-                        for (SubscriptionInfo subscription : subscriptions) {
-                            String phoneNumber = normalizeWhitespace(
-                                    subscriptionManager.getPhoneNumber(
-                                            subscription.getSubscriptionId()
-                                    )
-                            );
-                            if (!phoneNumber.isEmpty()) {
-                                return phoneNumber;
-                            }
-                        }
-                    }
-                } catch (SecurityException ignored) {
-                    // Fall back to TelephonyManager below.
-                }
-            }
-        }
-
-        TelephonyManager telephonyManager = getSystemService(TelephonyManager.class);
-        if (telephonyManager == null) {
-            return "";
-        }
-
-        try {
-            return normalizeWhitespace(telephonyManager.getLine1Number());
-        } catch (SecurityException ignored) {
-            return "";
-        }
     }
 
     private String loadPhoneNumberFromOwnerProfile() {
@@ -2198,12 +2262,6 @@ public class NewReceiptActivity extends AppCompatActivity {
                 new LinearLayout.LayoutParams(buttonSize, buttonSize);
         layoutParams.setMargins(buttonSpacing, 0, buttonSpacing, 0);
         participantButton.setLayoutParams(layoutParams);
-        participantButton.setText(getParticipantBadgeLabel(participant));
-        participantButton.setAllCaps(false);
-        participantButton.setTextSize(
-                TypedValue.COMPLEX_UNIT_SP,
-                getParticipantBadgeTextSizeSp(participant, false)
-        );
         participantButton.setCheckable(false);
         participantButton.setClickable(true);
         participantButton.setInsetTop(0);
@@ -2214,6 +2272,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         participantButton.setMinimumHeight(0);
         participantButton.setPadding(0, 0, 0, 0);
         participantButton.setCornerRadius(buttonSize / 2);
+        applyParticipantBadgeTextStyle(participantButton, participant, false);
         if (isCrownedParticipant(participant)) {
             participantButton.setStrokeWidth(dpToPx(2));
             participantButton.setStrokeColor(ColorStateList.valueOf(Color.WHITE));
@@ -2308,8 +2367,6 @@ public class NewReceiptActivity extends AppCompatActivity {
                 dialogView.findViewById(R.id.input_layout_receipt_summary_receipt_name);
         TextInputEditText receiptNameInputView =
                 dialogView.findViewById(R.id.edit_receipt_summary_receipt_name);
-        TextInputEditText messageInputView =
-                dialogView.findViewById(R.id.edit_receipt_summary_message);
         View closeButton = dialogView.findViewById(R.id.button_close_receipt_summary);
         MaterialButton sendRequestsButton = dialogView.findViewById(R.id.button_send_requests);
 
@@ -2364,11 +2421,6 @@ public class NewReceiptActivity extends AppCompatActivity {
                             summaryRootView,
                             event
                     );
-                    clearSummaryTextInputFocusIfTappedOutside(
-                            messageInputView,
-                            summaryRootView,
-                            event
-                    );
                 }
 
                 return super.dispatchTouchEvent(event);
@@ -2386,7 +2438,7 @@ public class NewReceiptActivity extends AppCompatActivity {
             showSendRequestsConfirmationDialog(
                     dialog,
                     receiptName,
-                    getText(messageInputView)
+                    ""
             );
         });
 
@@ -2410,12 +2462,6 @@ public class NewReceiptActivity extends AppCompatActivity {
             layoutParams.height = buttonSize;
             badgeButton.setLayoutParams(layoutParams);
         }
-        badgeButton.setText(getParticipantBadgeLabel(participant));
-        badgeButton.setAllCaps(false);
-        badgeButton.setTextSize(
-                TypedValue.COMPLEX_UNIT_SP,
-                getParticipantBadgeTextSizeSp(participant, false)
-        );
         badgeButton.setCheckable(false);
         badgeButton.setClickable(false);
         badgeButton.setFocusable(false);
@@ -2427,6 +2473,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         badgeButton.setMinimumHeight(0);
         badgeButton.setPadding(0, 0, 0, 0);
         badgeButton.setCornerRadius(buttonSize / 2);
+        applyParticipantBadgeTextStyle(badgeButton, participant, false);
         if (isCrownedParticipant(participant)) {
             badgeButton.setStrokeWidth(dpToPx(2));
             badgeButton.setStrokeColor(ColorStateList.valueOf(Color.WHITE));
@@ -2626,10 +2673,15 @@ public class NewReceiptActivity extends AppCompatActivity {
         int sentCount = 0;
         int skippedCount = 0;
         String receiptName = getCurrentReceiptName();
-        String receiptTotal = formatCurrency(BigDecimal.valueOf(computeReceiptTotalCents(), 2));
+        Participant ownerParticipant = getReceiptOwnerParticipant();
+        String ownerPhoneNumber = getParticipantPhoneNumberForMessage(ownerParticipant);
         ArrayList<ReceiptHistoryStore.ParticipantShare> historyParticipants =
                 buildHistoryParticipants();
         ArrayList<ReceiptHistoryStore.HistoryItem> historyItems = buildHistoryItems();
+        String ownerMessage = buildOwnerPaymentRequestMessage(
+                ownerParticipant,
+                receiptName
+        );
 
         for (Participant participant : participants) {
             if (isDefaultParticipant(participant)) {
@@ -2638,23 +2690,22 @@ public class NewReceiptActivity extends AppCompatActivity {
 
             BigDecimal participantTotal = computeParticipantShareTotal(participant);
             String phoneNumber = normalizeWhitespace(participant.phoneNumber);
-            if (participantTotal.compareTo(BigDecimal.ZERO) <= 0 || !isValidPhoneNumber(phoneNumber)) {
+            boolean isOwner = participant.key.equals(ownerParticipant.key);
+            if (!isValidPhoneNumber(phoneNumber)
+                    || (!isOwner && participantTotal.compareTo(BigDecimal.ZERO) <= 0)) {
                 skippedCount++;
                 continue;
             }
 
-            String message = getString(
-                    R.string.participant_payment_request_message,
-                    participant.name,
-                    receiptName,
-                    receiptTotal,
-                    formatCurrency(participantTotal)
-            );
-            if (!customMessage.isEmpty()) {
-                message = message
-                        + "\n\n"
-                        + getString(R.string.participant_payment_request_custom_message, customMessage);
-            }
+            String message = isOwner
+                    ? ownerMessage
+                    : buildNonOwnerPaymentRequestMessage(
+                            participant,
+                            participantTotal,
+                            receiptName,
+                            ownerParticipant,
+                            ownerPhoneNumber
+                    );
 
             try {
                 ArrayList<String> messageParts = smsManager.divideMessage(message);
@@ -2692,6 +2743,88 @@ public class NewReceiptActivity extends AppCompatActivity {
                 Toast.LENGTH_SHORT
         ).show();
         returnToMainMenu();
+    }
+
+    @NonNull
+    private Participant getReceiptOwnerParticipant() {
+        Participant crownedParticipant = findParticipantByKey(crownedParticipantKey);
+        if (crownedParticipant != null) {
+            return crownedParticipant;
+        }
+
+        Participant defaultParticipant = findParticipantByKey(DEFAULT_PARTICIPANT_KEY);
+        if (defaultParticipant != null) {
+            return defaultParticipant;
+        }
+
+        if (!participants.isEmpty()) {
+            return participants.get(0);
+        }
+
+        throw new IllegalStateException("No participants available when sending payment requests.");
+    }
+
+    @NonNull
+    private String buildOwnerPaymentRequestMessage(
+            @NonNull Participant ownerParticipant,
+            @NonNull String receiptName
+    ) {
+        StringBuilder participantLines = new StringBuilder();
+        for (Participant participant : participants) {
+            if (participantLines.length() > 0) {
+                participantLines.append('\n');
+            }
+            participantLines.append(
+                    getString(
+                            R.string.participant_payment_request_owner_line,
+                            getParticipantExternalDisplayName(participant),
+                            formatCurrency(computeParticipantShareTotal(participant))
+                    )
+            );
+        }
+
+        String message = getString(
+                R.string.participant_payment_request_owner_message,
+                getParticipantExternalDisplayName(ownerParticipant),
+                receiptName,
+                participantLines.toString()
+        );
+        return message;
+    }
+
+    @NonNull
+    private String buildNonOwnerPaymentRequestMessage(
+            @NonNull Participant participant,
+            @NonNull BigDecimal participantTotal,
+            @NonNull String receiptName,
+            @NonNull Participant ownerParticipant,
+            @NonNull String ownerPhoneNumber
+    ) {
+        return getString(
+                R.string.participant_payment_request_non_owner_message,
+                getParticipantExternalDisplayName(participant),
+                receiptName,
+                formatCurrency(participantTotal),
+                getParticipantExternalDisplayName(ownerParticipant),
+                ownerPhoneNumber
+        );
+    }
+
+    @NonNull
+    private String getParticipantPhoneNumberForMessage(@NonNull Participant participant) {
+        String phoneNumber = normalizeWhitespace(participant.phoneNumber);
+        if (!phoneNumber.isEmpty()) {
+            return phoneNumber;
+        }
+        return getString(R.string.participant_phone_unavailable);
+    }
+
+    @NonNull
+    private String getParticipantExternalDisplayName(@NonNull Participant participant) {
+        if (isDefaultParticipant(participant)) {
+            return AppSettings.getUsernameNickname(this);
+        }
+        return participant.name;
     }
 
     private BigDecimal computeParticipantShareTotal(Participant participant) {
@@ -2852,12 +2985,6 @@ public class NewReceiptActivity extends AppCompatActivity {
                     new LinearLayout.LayoutParams(checkboxSize, checkboxSize);
             layoutParams.setMargins(indexInRow == 0 ? 0 : checkboxSpacing, 0, 0, 0);
             selectionButton.setLayoutParams(layoutParams);
-            selectionButton.setText(getParticipantBadgeLabel(participant));
-            selectionButton.setAllCaps(false);
-            selectionButton.setTextSize(
-                    TypedValue.COMPLEX_UNIT_SP,
-                    getParticipantBadgeTextSizeSp(participant, true)
-            );
             selectionButton.setInsetTop(0);
             selectionButton.setInsetBottom(0);
             selectionButton.setMinWidth(0);
@@ -2867,6 +2994,7 @@ public class NewReceiptActivity extends AppCompatActivity {
             selectionButton.setPadding(0, 0, 0, 0);
             selectionButton.setCornerRadius(dpToPx(10));
             selectionButton.setStrokeWidth(dpToPx(2));
+            applyParticipantBadgeTextStyle(selectionButton, participant, true);
             selectionButton.setBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));
             selectionButton.setFocusable(false);
             selectionButton.setFocusableInTouchMode(false);
@@ -2944,9 +3072,34 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private String getParticipantBadgeLabel(Participant participant) {
         if (isDefaultParticipant(participant)) {
-            return DEFAULT_PARTICIPANT_NAME;
+            return getDefaultParticipantBadgeLabel();
         }
         return participant.initials;
+    }
+
+    @NonNull
+    private String getDefaultParticipantBadgeLabel() {
+        return DEFAULT_PARTICIPANT_NAME;
+    }
+
+    private void applyParticipantBadgeTextStyle(
+            @NonNull MaterialButton badgeButton,
+            @NonNull Participant participant,
+            boolean compact
+    ) {
+        badgeButton.setText(getParticipantBadgeLabel(participant));
+        badgeButton.setAllCaps(false);
+        badgeButton.setGravity(Gravity.CENTER);
+        badgeButton.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+        badgeButton.setIncludeFontPadding(false);
+        badgeButton.setSingleLine(true);
+        TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
+                badgeButton,
+                compact ? 6 : 8,
+                (int) getParticipantBadgeTextSizeSp(participant, compact),
+                1,
+                TypedValue.COMPLEX_UNIT_SP
+        );
     }
 
     private float getParticipantBadgeTextSizeSp(Participant participant, boolean compact) {
@@ -3381,26 +3534,69 @@ public class NewReceiptActivity extends AppCompatActivity {
         }
     }
 
-    private final class PhoneContactsAdapter extends ArrayAdapter<PhoneContact> {
-        PhoneContactsAdapter(ArrayList<PhoneContact> contacts) {
+    private final class PhoneContactsAdapter extends ArrayAdapter<PhoneContactsListItem> {
+        private static final int VIEW_TYPE_SECTION = 0;
+        private static final int VIEW_TYPE_CONTACT = 1;
+
+        PhoneContactsAdapter(ArrayList<PhoneContactsListItem> contacts) {
             super(NewReceiptActivity.this, R.layout.item_phone_contact, contacts);
+        }
+
+        @Override
+        public int getViewTypeCount() {
+            return 2;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            PhoneContactsListItem item = getItem(position);
+            return item != null && item.isSection() ? VIEW_TYPE_SECTION : VIEW_TYPE_CONTACT;
+        }
+
+        @Override
+        public boolean isEnabled(int position) {
+            PhoneContactsListItem item = getItem(position);
+            return item != null && !item.isSection();
+        }
+
+        @Nullable
+        private PhoneContact getContact(int position) {
+            PhoneContactsListItem item = getItem(position);
+            return item == null ? null : item.contact;
         }
 
         @NonNull
         @Override
         public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
+            PhoneContactsListItem item = getItem(position);
+            if (item != null && item.isSection()) {
+                View sectionView = convertView;
+                if (sectionView == null || getItemViewType(position) != VIEW_TYPE_SECTION) {
+                    sectionView = getLayoutInflater().inflate(
+                            R.layout.item_phone_contact_section,
+                            parent,
+                            false
+                    );
+                }
+
+                TextView sectionLabelView =
+                        sectionView.findViewById(R.id.text_phone_contact_section);
+                sectionLabelView.setText(item.sectionLabel);
+                return sectionView;
+            }
+
             View itemView = convertView;
-            if (itemView == null) {
+            if (itemView == null || getItemViewType(position) != VIEW_TYPE_CONTACT) {
                 itemView = getLayoutInflater().inflate(R.layout.item_phone_contact, parent, false);
             }
 
-            PhoneContact contact = getItem(position);
+            PhoneContact contact = item == null ? null : item.contact;
             MaterialButton badgeButton = itemView.findViewById(R.id.button_phone_contact_badge);
             TextView nameView = itemView.findViewById(R.id.text_phone_contact_name);
             TextView phoneView = itemView.findViewById(R.id.text_phone_contact_number);
 
             if (contact != null) {
-                configurePhoneContactBadgeButton(badgeButton, contact, position);
+                configurePhoneContactBadgeButton(badgeButton, contact);
                 nameView.setText(contact.name);
                 phoneView.setText(contact.phoneNumber);
             }
@@ -3411,8 +3607,7 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     private void configurePhoneContactBadgeButton(
             @NonNull MaterialButton badgeButton,
-            @NonNull PhoneContact contact,
-            int contactIndex
+            @NonNull PhoneContact contact
     ) {
         int buttonSize = dpToPx(52);
         ViewGroup.LayoutParams layoutParams = badgeButton.getLayoutParams();
@@ -3421,7 +3616,7 @@ public class NewReceiptActivity extends AppCompatActivity {
             layoutParams.height = buttonSize;
             badgeButton.setLayoutParams(layoutParams);
         }
-        int badgeColor = createParticipantColor(contactIndex);
+        int badgeColor = createStablePhoneContactColor(contact);
         badgeButton.setText(getParticipantInitials(contact.name));
         badgeButton.setAllCaps(false);
         badgeButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
@@ -3442,17 +3637,29 @@ public class NewReceiptActivity extends AppCompatActivity {
         badgeButton.setContentDescription(contact.name);
     }
 
+    private int createStablePhoneContactColor(@NonNull PhoneContact contact) {
+        String contactKey = normalizeWhitespace(contact.name).toLowerCase(Locale.US)
+                + "\u001F"
+                + normalizePhoneNumber(contact.phoneNumber);
+        int stableIndex = (contactKey.hashCode() & 0x7fffffff) % 1024;
+        return createParticipantColor(stableIndex);
+    }
+
     private void configureAddParticipantKeyboardBehavior(
             @NonNull View dialogView,
+            @NonNull TextInputLayout nameLayout,
             @NonNull TextInputEditText nameInput,
             @NonNull TextInputEditText phoneInput
     ) {
+        updateParticipantNameSearchIconVisibility(nameLayout, nameInput);
         View.OnFocusChangeListener focusChangeListener = (view, hasFocus) -> {
+            updateParticipantNameSearchIconVisibility(nameLayout, nameInput);
             if (hasFocus) {
                 return;
             }
 
             dialogView.post(() -> {
+                updateParticipantNameSearchIconVisibility(nameLayout, nameInput);
                 if (!nameInput.isFocused() && !phoneInput.isFocused()) {
                     hideKeyboardAndClearFocus((TextInputEditText) view, dialogView);
                 }
@@ -3474,6 +3681,50 @@ public class NewReceiptActivity extends AppCompatActivity {
         phoneInput.setOnEditorActionListener(editorActionListener);
     }
 
+    private void updateParticipantNameSearchIconVisibility(
+            @NonNull TextInputLayout nameLayout,
+            @NonNull TextInputEditText nameInput
+    ) {
+        nameLayout.setEndIconVisible(!nameInput.isFocused());
+    }
+
+    private void installAddParticipantKeyboardDismissWatcher(
+            @NonNull Dialog dialog,
+            @NonNull View dialogView,
+            @NonNull TextInputLayout nameLayout,
+            @NonNull TextInputEditText nameInput,
+            @NonNull TextInputEditText phoneInput
+    ) {
+        Rect visibleFrame = new Rect();
+        boolean[] wasKeyboardVisible = {false};
+        ViewTreeObserver.OnGlobalLayoutListener layoutListener = () -> {
+            dialogView.getWindowVisibleDisplayFrame(visibleFrame);
+            int rootHeight = dialogView.getRootView().getHeight();
+            int keyboardHeight = Math.max(0, rootHeight - visibleFrame.height());
+            boolean isKeyboardVisible = keyboardHeight > dpToPx(120);
+
+            if (wasKeyboardVisible[0] && !isKeyboardVisible) {
+                TextInputEditText focusedInput = nameInput.isFocused()
+                        ? nameInput
+                        : phoneInput.isFocused() ? phoneInput : null;
+                if (focusedInput != null) {
+                    hideKeyboardAndClearFocus(focusedInput, dialogView);
+                    updateParticipantNameSearchIconVisibility(nameLayout, nameInput);
+                }
+            }
+
+            wasKeyboardVisible[0] = isKeyboardVisible;
+        };
+
+        dialogView.getViewTreeObserver().addOnGlobalLayoutListener(layoutListener);
+        dialog.setOnDismissListener(dismissedDialog -> {
+            ViewTreeObserver viewTreeObserver = dialogView.getViewTreeObserver();
+            if (viewTreeObserver.isAlive()) {
+                viewTreeObserver.removeOnGlobalLayoutListener(layoutListener);
+            }
+        });
+    }
+
     private void hideKeyboardAndClearFocus(
             @NonNull TextInputEditText inputView,
             @NonNull View fallbackView
@@ -3488,6 +3739,32 @@ public class NewReceiptActivity extends AppCompatActivity {
         private PhoneContact(String name, String phoneNumber) {
             this.name = name;
             this.phoneNumber = phoneNumber;
+        }
+    }
+
+    private static final class PhoneContactsListItem {
+        @Nullable
+        private final String sectionLabel;
+        @Nullable
+        private final PhoneContact contact;
+
+        private PhoneContactsListItem(@Nullable String sectionLabel, @Nullable PhoneContact contact) {
+            this.sectionLabel = sectionLabel;
+            this.contact = contact;
+        }
+
+        @NonNull
+        private static PhoneContactsListItem createSection(@NonNull String sectionLabel) {
+            return new PhoneContactsListItem(sectionLabel, null);
+        }
+
+        @NonNull
+        private static PhoneContactsListItem createContact(@NonNull PhoneContact contact) {
+            return new PhoneContactsListItem(null, contact);
+        }
+
+        private boolean isSection() {
+            return sectionLabel != null;
         }
     }
 

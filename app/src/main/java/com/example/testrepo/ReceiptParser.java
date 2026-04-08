@@ -226,6 +226,7 @@ final class ReceiptParser {
                         1,
                         splitPantAmounts[index]
                 );
+                splitItem.setSourceOrder(item.getSourceOrder());
                 splitItem.selectParticipants(item.copySelectedParticipantKeys());
                 expandedItems.add(splitItem);
             }
@@ -702,6 +703,7 @@ final class ReceiptParser {
         private int amountCents;
         private final int splitQuantity;
         private final int pantAmountCents;
+        private int sourceOrder;
         private final Set<String> selectedParticipantKeys = new HashSet<>();
 
         ReceiptItem(String name, int amountCents) {
@@ -763,6 +765,14 @@ final class ReceiptParser {
             return amountCents - pantAmountCents;
         }
 
+        int getSourceOrder() {
+            return sourceOrder;
+        }
+
+        void setSourceOrder(int sourceOrder) {
+            this.sourceOrder = Math.max(0, sourceOrder);
+        }
+
         boolean isParticipantSelected(String participantKey) {
             return selectedParticipantKeys.contains(participantKey);
         }
@@ -795,6 +805,7 @@ final class ReceiptParser {
         @NonNull
         ReceiptItem copy() {
             ReceiptItem copy = new ReceiptItem(name, amountCents, splitQuantity, pantAmountCents);
+            copy.setSourceOrder(sourceOrder);
             copy.selectParticipants(selectedParticipantKeys);
             return copy;
         }

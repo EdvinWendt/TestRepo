@@ -1,5 +1,4 @@
 package com.example.testrepo;
-
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -15,6 +14,7 @@ import android.widget.ArrayAdapter;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -22,6 +22,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.AppCompatImageButton;
 import androidx.core.content.ContextCompat;
+import androidx.core.widget.TextViewCompat;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
@@ -52,6 +53,7 @@ public class HistoryActivity extends AppCompatActivity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        InstallResetHelper.resetInstallScopedDataIfNeeded(this);
         setContentView(R.layout.activity_history);
 
         View backButton = findViewById(R.id.button_back);
@@ -127,6 +129,8 @@ public class HistoryActivity extends AppCompatActivity {
                 .inflate(R.layout.dialog_history_receipt_details, null);
         TextView titleView = dialogView.findViewById(R.id.text_history_receipt_dialog_title);
         TextView messageView = dialogView.findViewById(R.id.text_history_receipt_dialog_message);
+        AppCompatImageButton removeButton =
+                dialogView.findViewById(R.id.button_history_receipt_remove);
         LinearLayout participantsLayout =
                 dialogView.findViewById(R.id.layout_history_receipt_participants);
         TextView toggleItemsView =
@@ -167,7 +171,27 @@ public class HistoryActivity extends AppCompatActivity {
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setView(dialogView)
                 .create();
+        removeButton.setOnClickListener(view -> {
+            dialog.dismiss();
+            removeHistoryEntry(entry);
+        });
         dialog.show();
+    }
+
+    private void removeHistoryEntry(@NonNull ReceiptHistoryStore.HistoryEntry entry) {
+        int previousVisibleCount = Math.max(
+                visibleHistoryEntries.size(),
+                INITIAL_VISIBLE_HISTORY_COUNT
+        );
+        if (!ReceiptHistoryStore.removeEntry(this, entry)) {
+            Toast.makeText(this, R.string.remove_history_entry_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        historyEntries.clear();
+        historyEntries.addAll(ReceiptHistoryStore.loadEntries(this));
+        visibleHistoryCount = previousVisibleCount;
+        refreshVisibleHistoryEntries();
     }
 
     private void bindHistoryParticipantButtons(
@@ -225,12 +249,6 @@ public class HistoryActivity extends AppCompatActivity {
             layoutParams.height = buttonSize;
             participantButton.setLayoutParams(layoutParams);
         }
-        participantButton.setText(getParticipantBadgeLabel(participant));
-        participantButton.setAllCaps(false);
-        participantButton.setTextSize(
-                TypedValue.COMPLEX_UNIT_SP,
-                getParticipantBadgeTextSizeSp(participant, false)
-        );
         participantButton.setClickable(clickable);
         participantButton.setFocusable(clickable);
         participantButton.setEnabled(true);
@@ -242,6 +260,7 @@ public class HistoryActivity extends AppCompatActivity {
         participantButton.setMinimumHeight(0);
         participantButton.setPadding(0, 0, 0, 0);
         participantButton.setCornerRadius(buttonSize / 2);
+        applyParticipantBadgeTextStyle(participantButton, participant, false);
         if (isCrownedParticipant(participant)) {
             participantButton.setStrokeWidth(dpToPx(2));
             participantButton.setStrokeColor(ColorStateList.valueOf(Color.WHITE));
@@ -348,12 +367,6 @@ public class HistoryActivity extends AppCompatActivity {
                     new LinearLayout.LayoutParams(checkboxSize, checkboxSize);
             layoutParams.setMargins(indexInRow == 0 ? 0 : checkboxSpacing, 0, 0, 0);
             selectionButton.setLayoutParams(layoutParams);
-            selectionButton.setText(getParticipantBadgeLabel(participant));
-            selectionButton.setAllCaps(false);
-            selectionButton.setTextSize(
-                    TypedValue.COMPLEX_UNIT_SP,
-                    getParticipantBadgeTextSizeSp(participant, true)
-            );
             selectionButton.setInsetTop(0);
             selectionButton.setInsetBottom(0);
             selectionButton.setMinWidth(0);
@@ -363,6 +376,7 @@ public class HistoryActivity extends AppCompatActivity {
             selectionButton.setPadding(0, 0, 0, 0);
             selectionButton.setCornerRadius(dpToPx(10));
             selectionButton.setStrokeWidth(dpToPx(2));
+            applyParticipantBadgeTextStyle(selectionButton, participant, true);
             selectionButton.setBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));
             selectionButton.setFocusable(true);
             selectionButton.setClickable(true);
@@ -508,7 +522,7 @@ public class HistoryActivity extends AppCompatActivity {
     @NonNull
     private String getParticipantBadgeLabel(@NonNull ReceiptHistoryStore.ParticipantShare participant) {
         if (isDefaultParticipant(participant)) {
-            return DEFAULT_PARTICIPANT_NAME;
+            return getDefaultParticipantBadgeLabel();
         }
 
         String initials = normalizeWhitespace(participant.initials);
@@ -516,6 +530,31 @@ public class HistoryActivity extends AppCompatActivity {
             return initials;
         }
         return deriveInitials(participant.name);
+    }
+
+    @NonNull
+    private String getDefaultParticipantBadgeLabel() {
+        return DEFAULT_PARTICIPANT_NAME;
+    }
+
+    private void applyParticipantBadgeTextStyle(
+            @NonNull MaterialButton badgeButton,
+            @NonNull ReceiptHistoryStore.ParticipantShare participant,
+            boolean compact
+    ) {
+        badgeButton.setText(getParticipantBadgeLabel(participant));
+        badgeButton.setAllCaps(false);
+        badgeButton.setGravity(Gravity.CENTER);
+        badgeButton.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+        badgeButton.setIncludeFontPadding(false);
+        badgeButton.setSingleLine(true);
+        TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
+                badgeButton,
+                compact ? 6 : 8,
+                (int) getParticipantBadgeTextSizeSp(participant, compact),
+                1,
+                TypedValue.COMPLEX_UNIT_SP
+        );
     }
 
     private float getParticipantBadgeTextSizeSp(
