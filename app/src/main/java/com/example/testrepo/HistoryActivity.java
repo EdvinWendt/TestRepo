@@ -172,10 +172,24 @@ public class HistoryActivity extends AppCompatActivity {
                 .setView(dialogView)
                 .create();
         removeButton.setOnClickListener(view -> {
-            dialog.dismiss();
-            removeHistoryEntry(entry);
+            showDeleteHistoryDialog(entry, dialog);
         });
         dialog.show();
+    }
+
+    private void showDeleteHistoryDialog(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull AlertDialog historyDetailsDialog
+    ) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.delete_history_title)
+                .setMessage(getString(R.string.delete_history_message, entry.receiptName))
+                .setNegativeButton(R.string.back, null)
+                .setPositiveButton(R.string.delete, (dialogInterface, which) -> {
+                    historyDetailsDialog.dismiss();
+                    removeHistoryEntry(entry);
+                })
+                .show();
     }
 
     private void removeHistoryEntry(@NonNull ReceiptHistoryStore.HistoryEntry entry) {

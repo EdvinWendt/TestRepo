@@ -13,6 +13,16 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         InstallResetHelper.resetInstallScopedDataIfNeeded(this);
         setContentView(R.layout.activity_main);
+        getSupportFragmentManager().setFragmentResultListener(
+                EditUsernameDialogFragment.REQUEST_KEY,
+                this,
+                (requestKey, result) -> maybeShowStartupPermissionPrompt(
+                        result.getBoolean(
+                                EditUsernameDialogFragment.RESULT_KEY_REQUIRED_USERNAME,
+                                false
+                        )
+                )
+        );
 
         View settingsMenuButton = findViewById(R.id.button_main_actions);
         findViewById(R.id.button_new_receipt).setOnClickListener(
@@ -36,5 +46,13 @@ public class MainActivity extends AppCompatActivity {
         if (AppSettings.isUsernameNicknameEmpty(this)) {
             EditUsernameDialogFragment.show(getSupportFragmentManager(), true);
         }
+    }
+
+    private void maybeShowStartupPermissionPrompt(boolean requiredUsernameFlow) {
+        if (!requiredUsernameFlow || AppSettings.hasStartupPermissionPromptBeenShown(this)) {
+            return;
+        }
+
+        PermissionOnboardingDialogFragment.show(getSupportFragmentManager());
     }
 }

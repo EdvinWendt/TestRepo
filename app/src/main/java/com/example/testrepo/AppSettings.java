@@ -20,7 +20,10 @@ public final class AppSettings {
     private static final String KEY_AUTO_ROTATE_IMAGE = "auto_rotate_image";
     private static final String KEY_SPLIT_ITEMS = "split_items";
     private static final String KEY_PRE_ADDED_PARTICIPANTS = "pre_added_participants";
+    private static final String KEY_FAVORITE_PHONE_CONTACTS = "favorite_phone_contacts";
     private static final String KEY_USERNAME_NICKNAME = "username_nickname";
+    private static final String KEY_STARTUP_PERMISSION_PROMPT_SHOWN =
+            "startup_permission_prompt_shown";
     private static final boolean DEFAULT_AUTO_ROTATE_IMAGE_ENABLED = true;
     private static final boolean DEFAULT_SPLIT_ITEMS_ENABLED = false;
     private static final String DEFAULT_USERNAME_NICKNAME = "";
@@ -78,6 +81,17 @@ public final class AppSettings {
         getPreferences(context)
                 .edit()
                 .putString(KEY_USERNAME_NICKNAME, DEFAULT_USERNAME_NICKNAME)
+                .apply();
+    }
+
+    public static boolean hasStartupPermissionPromptBeenShown(@NonNull Context context) {
+        return getPreferences(context).getBoolean(KEY_STARTUP_PERMISSION_PROMPT_SHOWN, false);
+    }
+
+    public static void setStartupPermissionPromptShown(@NonNull Context context, boolean shown) {
+        getPreferences(context)
+                .edit()
+                .putBoolean(KEY_STARTUP_PERMISSION_PROMPT_SHOWN, shown)
                 .apply();
     }
 
@@ -141,6 +155,40 @@ public final class AppSettings {
         setPreAddedParticipants(context, participants);
     }
 
+    public static boolean isFavoritePhoneContact(
+            @NonNull Context context,
+            @Nullable String name,
+            @Nullable String phoneNumber
+    ) {
+        return getFavoritePhoneContactKeys(context).contains(
+                buildFavoritePhoneContactKey(name, phoneNumber)
+        );
+    }
+
+    public static void setFavoritePhoneContact(
+            @NonNull Context context,
+            @Nullable String name,
+            @Nullable String phoneNumber,
+            boolean favorite
+    ) {
+        Set<String> favoriteKeys = getFavoritePhoneContactKeys(context);
+        String contactKey = buildFavoritePhoneContactKey(name, phoneNumber);
+        if (contactKey.isEmpty()) {
+            return;
+        }
+
+        if (favorite) {
+            favoriteKeys.add(contactKey);
+        } else {
+            favoriteKeys.remove(contactKey);
+        }
+
+        getPreferences(context)
+                .edit()
+                .putStringSet(KEY_FAVORITE_PHONE_CONTACTS, new HashSet<>(favoriteKeys))
+                .apply();
+    }
+
     public static boolean isPreAddedParticipantsPreferenceKey(@Nullable String key) {
         return KEY_PRE_ADDED_PARTICIPANTS.equals(key);
     }
@@ -183,6 +231,28 @@ public final class AppSettings {
                 .edit()
                 .putString(KEY_PRE_ADDED_PARTICIPANTS, participantsArray.toString())
                 .apply();
+    }
+
+    @NonNull
+    private static Set<String> getFavoritePhoneContactKeys(@NonNull Context context) {
+        Set<String> storedKeys = getPreferences(context).getStringSet(
+                KEY_FAVORITE_PHONE_CONTACTS,
+                new HashSet<>()
+        );
+        return storedKeys == null ? new HashSet<>() : new HashSet<>(storedKeys);
+    }
+
+    @NonNull
+    private static String buildFavoritePhoneContactKey(
+            @Nullable String name,
+            @Nullable String phoneNumber
+    ) {
+        String normalizedName = normalizeWhitespace(name).toLowerCase(Locale.US);
+        String normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+        if (normalizedName.isEmpty() || normalizedPhoneNumber.isEmpty()) {
+            return "";
+        }
+        return normalizedName + "\u001F" + normalizedPhoneNumber;
     }
 
     @NonNull

@@ -20,6 +20,7 @@ import com.google.android.material.textfield.TextInputEditText;
 
 public class EditUsernameDialogFragment extends DialogFragment {
     public static final String REQUEST_KEY = "edit_username_dialog_result";
+    public static final String RESULT_KEY_REQUIRED_USERNAME = "required_username";
     private static final String TAG = "EditUsernameDialog";
     private static final String ARG_REQUIRE_USERNAME = "require_username";
 
@@ -79,7 +80,9 @@ public class EditUsernameDialogFragment extends DialogFragment {
                     requireContext(),
                     usernameInput.getText() == null ? "" : usernameInput.getText().toString()
             );
-            getParentFragmentManager().setFragmentResult(REQUEST_KEY, Bundle.EMPTY);
+            Bundle result = new Bundle();
+            result.putBoolean(RESULT_KEY_REQUIRED_USERNAME, requireUsername);
+            getParentFragmentManager().setFragmentResult(REQUEST_KEY, result);
             dismiss();
             Toast.makeText(requireContext(), R.string.username_changed, Toast.LENGTH_SHORT).show();
         });

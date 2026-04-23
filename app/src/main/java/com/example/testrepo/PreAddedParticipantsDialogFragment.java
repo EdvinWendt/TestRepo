@@ -231,20 +231,30 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
         ArrayList<PhoneContact> allPhoneContacts = new ArrayList<>();
         boolean[] contactsLoading = new boolean[]{contactsPermissionGranted};
         PhoneContactsAdapter phoneContactsAdapter = new PhoneContactsAdapter(phoneContactRows);
-        phoneContactsList.setAdapter(phoneContactsAdapter);
-        phoneContactsList.setEmptyView(emptyContactsView);
-        addParticipantButton.setEnabled(false);
-        phoneContactsList.setOnItemClickListener((parent, view, position, id) -> {
-            PhoneContact selectedContact = phoneContactsAdapter.getContact(position);
-            if (selectedContact == null) {
-                return;
-            }
-
+        Runnable refreshSearchUi = () -> updateAddParticipantSearchUi(
+                nameLayout,
+                phoneLayout,
+                nameInput,
+                phoneContactsAdapter,
+                allPhoneContacts,
+                emptyContactsView,
+                contactsPermissionGranted,
+                contactsLoading[0]
+        );
+        phoneContactsAdapter.setOnFavoritesChanged(refreshSearchUi);
+        phoneContactsAdapter.setOnContactClicked(selectedContact -> {
             nameInput.setText(selectedContact.name);
             phoneInput.setText(selectedContact.phoneNumber);
             nameLayout.setError(null);
             phoneLayout.setError(null);
+            if (nameInput.isFocused()) {
+                hideKeyboardAndClearFocus(nameInput, dialogView);
+            }
+            dialogView.post(refreshSearchUi);
         });
+        phoneContactsList.setAdapter(phoneContactsAdapter);
+        phoneContactsList.setEmptyView(emptyContactsView);
+        addParticipantButton.setEnabled(false);
 
         TextWatcher validationWatcher = new TextWatcher() {
             @Override
@@ -264,10 +274,12 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
                         phoneInput,
                         addParticipantButton
                 );
-                updateVisiblePhoneContacts(
+                updateAddParticipantSearchUi(
+                        nameLayout,
+                        phoneLayout,
+                        nameInput,
                         phoneContactsAdapter,
                         allPhoneContacts,
-                        getText(nameInput),
                         emptyContactsView,
                         contactsPermissionGranted,
                         contactsLoading[0]
@@ -276,7 +288,13 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
         };
         nameInput.addTextChangedListener(validationWatcher);
         phoneInput.addTextChangedListener(validationWatcher);
-        configureAddParticipantKeyboardBehavior(dialogView, nameLayout, nameInput, phoneInput);
+        configureAddParticipantKeyboardBehavior(
+                dialogView,
+                nameLayout,
+                nameInput,
+                phoneInput,
+                refreshSearchUi
+        );
         updateAddParticipantButtonState(
                 nameLayout,
                 phoneLayout,
@@ -343,31 +361,17 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
         installAddParticipantKeyboardDismissWatcher(
                 dialog,
                 dialogView,
-                nameLayout,
                 nameInput,
-                phoneInput
+                phoneInput,
+                refreshSearchUi
         );
 
         if (!contactsPermissionGranted) {
-            updateVisiblePhoneContacts(
-                    phoneContactsAdapter,
-                    allPhoneContacts,
-                    getText(nameInput),
-                    emptyContactsView,
-                    false,
-                    false
-            );
+            refreshSearchUi.run();
             return;
         }
 
-        updateVisiblePhoneContacts(
-                phoneContactsAdapter,
-                allPhoneContacts,
-                getText(nameInput),
-                emptyContactsView,
-                true,
-                true
-        );
+        refreshSearchUi.run();
         if (backgroundExecutor == null) {
             return;
         }
@@ -386,16 +390,33 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
                 allPhoneContacts.clear();
                 allPhoneContacts.addAll(availableContacts);
                 contactsLoading[0] = false;
-                updateVisiblePhoneContacts(
-                        phoneContactsAdapter,
-                        allPhoneContacts,
-                        getText(nameInput),
-                        emptyContactsView,
-                        true,
-                        false
-                );
+                refreshSearchUi.run();
             });
         });
+    }
+
+    private void updateAddParticipantSearchUi(
+            @NonNull TextInputLayout nameLayout,
+            @NonNull TextInputLayout phoneLayout,
+            @NonNull TextInputEditText nameInput,
+            @NonNull PhoneContactsAdapter phoneContactsAdapter,
+            @NonNull List<PhoneContact> allPhoneContacts,
+            @NonNull TextView emptyContactsView,
+            boolean contactsPermissionGranted,
+            boolean contactsLoading
+    ) {
+        boolean isSearching = nameInput.isFocused();
+        updateParticipantNameSearchIconVisibility(nameLayout, nameInput);
+        phoneLayout.setVisibility(isSearching ? View.GONE : View.VISIBLE);
+        updateVisiblePhoneContacts(
+                phoneContactsAdapter,
+                allPhoneContacts,
+                getText(nameInput),
+                emptyContactsView,
+                contactsPermissionGranted,
+                contactsLoading,
+                !isSearching
+        );
     }
 
     private void updateVisiblePhoneContacts(
@@ -404,7 +425,8 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
             @NonNull String query,
             @NonNull TextView emptyContactsView,
             boolean contactsPermissionGranted,
-            boolean contactsLoading
+            boolean contactsLoading,
+            boolean showSectionHeaders
     ) {
         if (!contactsPermissionGranted) {
             phoneContactsAdapter.clear();
@@ -430,7 +452,7 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
         }
 
         phoneContactsAdapter.clear();
-        phoneContactsAdapter.addAll(buildPhoneContactRows(filteredContacts));
+        phoneContactsAdapter.addAll(buildPhoneContactRows(filteredContacts, showSectionHeaders));
         phoneContactsAdapter.notifyDataSetChanged();
 
         if (allPhoneContacts.isEmpty()) {
@@ -444,11 +466,42 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
 
     @NonNull
     private ArrayList<PhoneContactsListItem> buildPhoneContactRows(
-            @NonNull List<PhoneContact> contacts
+            @NonNull List<PhoneContact> contacts,
+            boolean includeSections
     ) {
         ArrayList<PhoneContactsListItem> rows = new ArrayList<>();
-        String previousSectionLabel = "";
+        ArrayList<PhoneContact> favoriteContacts = new ArrayList<>();
+        ArrayList<PhoneContact> remainingContacts = new ArrayList<>();
         for (PhoneContact contact : contacts) {
+            if (AppSettings.isFavoritePhoneContact(
+                    requireContext(),
+                    contact.name,
+                    contact.phoneNumber
+            )) {
+                favoriteContacts.add(contact);
+            } else {
+                remainingContacts.add(contact);
+            }
+        }
+
+        if (!favoriteContacts.isEmpty()) {
+            rows.add(PhoneContactsListItem.createSection(
+                    getString(R.string.phone_contacts_favorites_title)
+            ));
+            for (PhoneContact contact : favoriteContacts) {
+                rows.add(PhoneContactsListItem.createContact(contact));
+            }
+        }
+
+        if (!includeSections) {
+            for (PhoneContact contact : remainingContacts) {
+                rows.add(PhoneContactsListItem.createContact(contact));
+            }
+            return rows;
+        }
+
+        String previousSectionLabel = "";
+        for (PhoneContact contact : remainingContacts) {
             String sectionLabel = getPhoneContactSectionLabel(contact.name);
             if (!sectionLabel.equals(previousSectionLabel)) {
                 rows.add(PhoneContactsListItem.createSection(sectionLabel));
@@ -675,9 +728,21 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
             extends android.widget.ArrayAdapter<PhoneContactsListItem> {
         private static final int VIEW_TYPE_SECTION = 0;
         private static final int VIEW_TYPE_CONTACT = 1;
+        @Nullable
+        private Runnable onFavoritesChanged;
+        @Nullable
+        private OnPhoneContactClickListener onContactClicked;
 
         PhoneContactsAdapter(ArrayList<PhoneContactsListItem> contacts) {
             super(requireContext(), R.layout.item_phone_contact, contacts);
+        }
+
+        void setOnFavoritesChanged(@Nullable Runnable onFavoritesChanged) {
+            this.onFavoritesChanged = onFavoritesChanged;
+        }
+
+        void setOnContactClicked(@Nullable OnPhoneContactClickListener onContactClicked) {
+            this.onContactClicked = onContactClicked;
         }
 
         @Override
@@ -732,11 +797,27 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
             MaterialButton badgeButton = itemView.findViewById(R.id.button_phone_contact_badge);
             TextView nameView = itemView.findViewById(R.id.text_phone_contact_name);
             TextView phoneView = itemView.findViewById(R.id.text_phone_contact_number);
+            AppCompatImageButton favoriteButton =
+                    itemView.findViewById(R.id.button_phone_contact_favorite);
 
             if (contact != null) {
                 configurePhoneContactBadgeButton(badgeButton, contact);
                 nameView.setText(contact.name);
                 phoneView.setText(contact.phoneNumber);
+                configurePhoneContactFavoriteButton(favoriteButton, contact);
+                itemView.setOnClickListener(view -> {
+                    if (onContactClicked != null) {
+                        onContactClicked.onPhoneContactClicked(contact);
+                    }
+                });
+                favoriteButton.setOnClickListener(view -> {
+                    toggleFavoritePhoneContact(contact);
+                    if (onFavoritesChanged != null) {
+                        onFavoritesChanged.run();
+                    } else {
+                        notifyDataSetChanged();
+                    }
+                });
             }
 
             return itemView;
@@ -783,21 +864,55 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
         return createParticipantColor(stableIndex);
     }
 
+    private void configurePhoneContactFavoriteButton(
+            @NonNull AppCompatImageButton favoriteButton,
+            @NonNull PhoneContact contact
+    ) {
+        boolean isFavorite = AppSettings.isFavoritePhoneContact(
+                requireContext(),
+                contact.name,
+                contact.phoneNumber
+        );
+        favoriteButton.setImageResource(isFavorite ? R.drawable.star_true : R.drawable.star_false);
+        favoriteButton.setContentDescription(
+                getString(
+                        isFavorite
+                                ? R.string.remove_phone_contact_favorite
+                                : R.string.add_phone_contact_favorite
+                )
+        );
+    }
+
+    private void toggleFavoritePhoneContact(@NonNull PhoneContact contact) {
+        boolean isFavorite = AppSettings.isFavoritePhoneContact(
+                requireContext(),
+                contact.name,
+                contact.phoneNumber
+        );
+        AppSettings.setFavoritePhoneContact(
+                requireContext(),
+                contact.name,
+                contact.phoneNumber,
+                !isFavorite
+        );
+    }
+
     private void configureAddParticipantKeyboardBehavior(
             @NonNull View dialogView,
             @NonNull TextInputLayout nameLayout,
             @NonNull TextInputEditText nameInput,
-            @NonNull TextInputEditText phoneInput
+            @NonNull TextInputEditText phoneInput,
+            @NonNull Runnable updateSearchUi
     ) {
         updateParticipantNameSearchIconVisibility(nameLayout, nameInput);
         View.OnFocusChangeListener focusChangeListener = (view, hasFocus) -> {
-            updateParticipantNameSearchIconVisibility(nameLayout, nameInput);
+            updateSearchUi.run();
             if (hasFocus) {
                 return;
             }
 
             dialogView.post(() -> {
-                updateParticipantNameSearchIconVisibility(nameLayout, nameInput);
+                updateSearchUi.run();
                 if (!nameInput.isFocused() && !phoneInput.isFocused()) {
                     hideKeyboardAndClearFocus((TextInputEditText) view, dialogView);
                 }
@@ -810,6 +925,7 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
         TextView.OnEditorActionListener editorActionListener = (textView, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_DONE || actionId == EditorInfo.IME_NULL) {
                 hideKeyboardAndClearFocus((TextInputEditText) textView, dialogView);
+                dialogView.post(updateSearchUi);
                 return true;
             }
             return false;
@@ -829,9 +945,9 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
     private void installAddParticipantKeyboardDismissWatcher(
             @NonNull Dialog dialog,
             @NonNull View dialogView,
-            @NonNull TextInputLayout nameLayout,
             @NonNull TextInputEditText nameInput,
-            @NonNull TextInputEditText phoneInput
+            @NonNull TextInputEditText phoneInput,
+            @NonNull Runnable updateSearchUi
     ) {
         Rect visibleFrame = new Rect();
         boolean[] wasKeyboardVisible = {false};
@@ -847,7 +963,7 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
                         : phoneInput.isFocused() ? phoneInput : null;
                 if (focusedInput != null) {
                     hideKeyboardAndClearFocus(focusedInput, dialogView);
-                    updateParticipantNameSearchIconVisibility(nameLayout, nameInput);
+                    updateSearchUi.run();
                 }
             }
 
@@ -916,5 +1032,9 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
         private boolean isSection() {
             return sectionLabel != null;
         }
+    }
+
+    private interface OnPhoneContactClickListener {
+        void onPhoneContactClicked(@NonNull PhoneContact contact);
     }
 }

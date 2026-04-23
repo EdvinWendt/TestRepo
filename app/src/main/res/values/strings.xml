@@ -15,6 +15,8 @@
     <string name="history_no_participants">No participant details available.</string>
     <string name="remove_history_entry">Remove history entry</string>
     <string name="remove_history_entry_failed">Unable to remove this history entry.</string>
+    <string name="delete_history_title">Delete History</string>
+    <string name="delete_history_message">Are you sure you want to delete the %1$s receipt from the history? This action can not be undone.</string>
     <string name="receipt_actions">Receipt actions</string>
     <string name="button_take_picture">Take Picture</string>
     <string name="button_crop_receipt">Crop and Scan</string>
@@ -65,10 +67,13 @@
     <string name="filter_high_to_low">High to low</string>
     <string name="filter_low_to_high">Low to high</string>
     <string name="phone_contacts_title">Phone Contacts</string>
+    <string name="phone_contacts_favorites_title">Favorites</string>
     <string name="loading_phone_contacts">Loading phone contacts...</string>
     <string name="phone_contacts_permission_required">Allow contacts permission to load phone contacts.</string>
     <string name="no_phone_contacts">No phone contacts found.</string>
     <string name="no_matching_phone_contacts">No matching contacts found.</string>
+    <string name="add_phone_contact_favorite">Add contact to favorites</string>
+    <string name="remove_phone_contact_favorite">Remove contact from favorites</string>
     <string name="participant_added">Participant added.</string>
     <string name="participant_already_added">Participant already added.</string>
     <string name="participant_total_label">Total to pay</string>
@@ -94,6 +99,8 @@
     <string name="settings_permissions_sms_description">Allow Receipt Scanner to send and view SMS messages. Current access: %1$s</string>
     <string name="permission_access_allowed">Allowed</string>
     <string name="permission_access_not_allowed">Not allowed</string>
+    <string name="permission_onboarding_title">Permission</string>
+    <string name="permission_onboarding_message">Grant Receipt Scanner access to your contacts, camera, and SMS messages. These permissions are required for certain features of the app. You can change them at any time in Settings &gt; Permissions.</string>
     <string name="settings_split_items_title">Split Items</string>
     <string name="settings_split_items_description">Whether to list similar items individually or group them together.</string>
     <string name="settings_pre_added_participants_title">Pre Added Participants</string>
@@ -104,6 +111,7 @@
     <string name="manage_permissions_title">Manage Permissions</string>
     <string name="username_changed">Username changed</string>
     <string name="manage">Manage</string>
+    <string name="skip">Skip</string>
     <string name="yes">Yes</string>
     <string name="no">No</string>
     <string name="receipt_summary_title">Receipt Summary</string>
@@ -116,7 +124,7 @@
     <string name="send_requests_confirmation_title">Send Requests?</string>
     <string name="participant_payment_request_owner_message">Hello, %1$s!\n\nPayment requests have been sent to all participants of the %2$s receipt.\n\n%3$s</string>
     <string name="participant_payment_request_owner_line">%1$s: %2$skr</string>
-    <string name="participant_payment_request_non_owner_message">Hello, %1$s!\n\nYour share of the %2$s receipt is %3$skr, please send it to %4$s via Swish. (%5$s)</string>
+    <string name="participant_payment_request_non_owner_message">Hello, %1$s!\n\nYour share of the %2$s receipt is %3$skr, please send it to %4$s via Swish. (%5$s)\n\n%6$s</string>
     <string name="participant_payment_request_custom_message">Message:
 %1$s</string>
     <string name="send_requests_success">Sent %1$d payment reminders.</string>
@@ -124,10 +132,12 @@
     <string name="send_requests_none">No participant requests to send.</string>
     <string name="send_requests_permission_required">SMS permission is required to send payment reminders.</string>
     <string name="remove">Remove</string>
+    <string name="delete">Delete</string>
     <string name="clear">Clear</string>
     <string name="fill">Fill</string>
     <string name="edit">Edit</string>
     <string name="apply">Apply</string>
+    <string name="grant_permission">Continue</string>
     <string name="receipt_summary_receipt_name_required">Enter a receipt name.</string>
     <string name="receipt_summary_receipt_name_invalid">Use only letters, numbers, and spaces.</string>
     <string name="no_contacts">no contacts</string>
