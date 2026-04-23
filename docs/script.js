@@ -1,6 +1,6 @@
 const openSwishButton = document.querySelector("#open-swish");
 const swishStatus = document.querySelector("#swish-status");
-const SWISH_PAYMENT_URL = "https://app.swish.nu/1/p/sw/";
+const SWISH_PAYMENT_URL = "swish://payment?data=";
 
 const getQueryParameter = (name) => {
   const requestedName = name.toLowerCase();
@@ -15,7 +15,33 @@ const getQueryParameter = (name) => {
   return "";
 };
 
-const normalizePhoneNumber = (phoneNumber) => phoneNumber.replace(/\D/g, "");
+const normalizePhoneNumber = (phoneNumber) => {
+  const trimmedPhoneNumber = phoneNumber.trim();
+  const hasInternationalPrefix = trimmedPhoneNumber.startsWith("+");
+  const digitsOnlyPhoneNumber = trimmedPhoneNumber.replace(/\D/g, "");
+
+  if (!digitsOnlyPhoneNumber) {
+    return "";
+  }
+
+  if (hasInternationalPrefix) {
+    return `+${digitsOnlyPhoneNumber}`;
+  }
+
+  if (digitsOnlyPhoneNumber.startsWith("00")) {
+    return `+${digitsOnlyPhoneNumber.slice(2)}`;
+  }
+
+  if (digitsOnlyPhoneNumber.startsWith("46")) {
+    return `+${digitsOnlyPhoneNumber}`;
+  }
+
+  if (digitsOnlyPhoneNumber.startsWith("0")) {
+    return `+46${digitsOnlyPhoneNumber.slice(1)}`;
+  }
+
+  return digitsOnlyPhoneNumber;
+};
 
 const normalizeAmount = (amount) => amount.trim().replace(",", ".");
 
@@ -41,14 +67,26 @@ const buildSwishUrl = () => {
     return { error: validationMessage, url: "" };
   }
 
-  const swishUrl = new URL(SWISH_PAYMENT_URL);
-  swishUrl.searchParams.set("sw", phone);
-  swishUrl.searchParams.set("amt", amount);
-  swishUrl.searchParams.set("cur", "SEK");
-  swishUrl.searchParams.set("msg", message);
-  swishUrl.searchParams.set("src", "qr");
+  const paymentData = {
+    version: 1,
+    payee: {
+      value: phone
+    },
+    amount: {
+      value: Number(amount)
+    }
+  };
 
-  return { error: "", url: swishUrl.toString() };
+  if (message) {
+    paymentData.message = {
+      value: message
+    };
+  }
+
+  return {
+    error: "",
+    url: `${SWISH_PAYMENT_URL}${encodeURIComponent(JSON.stringify(paymentData))}`
+  };
 };
 
 if (openSwishButton && swishStatus) {
