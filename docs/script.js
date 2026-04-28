@@ -1,5 +1,6 @@
 const openSwishButton = document.querySelector("#open-swish");
 const swishStatus = document.querySelector("#swish-status");
+const SWISH_PAYMENT_REQUEST_URL = "swish://paymentrequest";
 const SWISH_PAYMENT_URL = "swish://payment?data=";
 
 const getQueryParameter = (name) => {
@@ -44,6 +45,7 @@ const normalizePhoneNumber = (phoneNumber) => {
 };
 
 const normalizeAmount = (amount) => amount.trim().replace(",", ".");
+const getPaymentToken = () => getQueryParameter("PaymentToken") || getQueryParameter("Token");
 
 const getMissingPaymentDetailMessage = (phone, amount) => {
   if (!phone) {
@@ -57,14 +59,35 @@ const getMissingPaymentDetailMessage = (phone, amount) => {
   return "";
 };
 
+const buildCallbackUrl = () => {
+  const callbackUrl = new URL(window.location.href);
+  callbackUrl.searchParams.delete("PaymentToken");
+  callbackUrl.searchParams.delete("paymenttoken");
+  callbackUrl.searchParams.delete("Token");
+  callbackUrl.searchParams.delete("token");
+  callbackUrl.searchParams.set("swish-return", "1");
+  return callbackUrl.toString();
+};
+
 const buildSwishUrl = () => {
+  const paymentToken = getPaymentToken();
+  if (paymentToken) {
+    return {
+      error: "",
+      mode: "paymentrequest",
+      url:
+        `${SWISH_PAYMENT_REQUEST_URL}?token=${encodeURIComponent(paymentToken)}` +
+        `&callbackurl=${encodeURIComponent(buildCallbackUrl())}`
+    };
+  }
+
   const phone = normalizePhoneNumber(getQueryParameter("Phone"));
   const amount = normalizeAmount(getQueryParameter("Amount"));
   const message = getQueryParameter("Message");
   const validationMessage = getMissingPaymentDetailMessage(phone, amount);
 
   if (validationMessage) {
-    return { error: validationMessage, url: "" };
+    return { error: `${validationMessage} Add PaymentToken to return here after payment.`, mode: "", url: "" };
   }
 
   const paymentData = {
@@ -85,11 +108,16 @@ const buildSwishUrl = () => {
 
   return {
     error: "",
+    mode: "direct",
     url: `${SWISH_PAYMENT_URL}${encodeURIComponent(JSON.stringify(paymentData))}`
   };
 };
 
 if (openSwishButton && swishStatus) {
+  if (getQueryParameter("swish-return") === "1") {
+    swishStatus.textContent = "Returned from Swish. Confirm the final payment result with your backend.";
+  }
+
   openSwishButton.addEventListener("click", () => {
     const swishLink = buildSwishUrl();
     if (swishLink.error) {
@@ -101,7 +129,10 @@ if (openSwishButton && swishStatus) {
 
     const fallbackTimer = window.setTimeout(() => {
       if (document.visibilityState === "visible") {
-        swishStatus.textContent = "If Swish did not open, make sure you are on a phone with Swish installed.";
+        swishStatus.textContent =
+          swishLink.mode === "paymentrequest"
+            ? "If Swish did not open, make sure you are on a phone with Swish installed."
+            : "If Swish opened, this direct-payment mode may not return here automatically. Use PaymentToken for return-to-site flow.";
       }
     }, 1600);
 
