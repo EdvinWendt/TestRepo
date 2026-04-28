@@ -115,7 +115,8 @@ const buildSwishUrl = () => {
 
 if (openSwishButton && swishStatus) {
   if (getQueryParameter("swish-return") === "1") {
-    swishStatus.textContent = "Returned from Swish. Confirm the final payment result with your backend.";
+    openSwishButton.hidden = true;
+    swishStatus.textContent = "The receipt manager has been notefied of your payment. Thank you for using Kvitt!";
   }
 
   openSwishButton.addEventListener("click", () => {
