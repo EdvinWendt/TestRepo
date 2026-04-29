@@ -5,10 +5,19 @@
         <item name="android:windowExitAnimation">@anim/dialog_fade_out</item>
     </style>
 
-    <style name="TestRepo_FullScreenDialog" parent="Theme.TestRepo">
+    <style name="TestRepo_FullScreenDialog.Blue" parent="Theme.TestRepo.Blue">
         <item name="android:windowIsFloating">false</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowBackground">?attr/colorSurface</item>
         <item name="android:windowAnimationStyle">@style/TestRepo_DialogAnimation</item>
     </style>
+
+    <style name="TestRepo_FullScreenDialog.Green" parent="Theme.TestRepo.Green">
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">?attr/colorSurface</item>
+        <item name="android:windowAnimationStyle">@style/TestRepo_DialogAnimation</item>
+    </style>
+
+    <style name="TestRepo_FullScreenDialog" parent="TestRepo_FullScreenDialog.Blue" />
 </resources>

@@ -26,7 +26,7 @@
             android:contentDescription="@string/back"
             android:padding="8dp"
             android:scaleType="center"
-            android:tint="@android:color/white"
+            android:tint="?attr/colorOnPrimary"
             app:srcCompat="@drawable/ic_back_chevron" />
 
         <androidx.appcompat.widget.AppCompatImageButton
@@ -39,7 +39,7 @@
             android:contentDescription="@string/more_options"
             android:padding="8dp"
             android:scaleType="center"
-            android:tint="@android:color/white"
+            android:tint="?attr/colorOnPrimary"
             app:srcCompat="@drawable/ic_more_vert" />
 
         <TextView
@@ -49,7 +49,7 @@
             android:layout_centerInParent="true"
             android:text="@string/history_screen_title"
             android:textAppearance="?attr/textAppearanceHeadlineSmall"
-            android:textColor="@android:color/white"
+            android:textColor="?attr/colorOnPrimary"
             android:textStyle="bold" />
     </RelativeLayout>
 

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -17,20 +18,38 @@
             android:id="@+id/text_participant_detail_name"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingEnd="56dp"
+            android:paddingEnd="88dp"
             android:textAppearance="?attr/textAppearanceHeadlineSmall"
             android:textStyle="bold" />
 
-        <androidx.appcompat.widget.AppCompatImageButton
-            android:id="@+id/button_participant_crown"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
             android:layout_gravity="top|end"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/participant_crown_unselected"
-            android:padding="4dp"
-            android:scaleType="centerInside"
-            android:src="@drawable/crown_false" />
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/button_participant_crown"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/participant_crown_unselected"
+                android:padding="4dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/crown_false"
+                app:tint="?attr/colorOnSurface" />
+
+            <TextView
+                android:id="@+id/text_participant_detail_payer_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/payer"
+                android:textAppearance="?attr/textAppearanceLabelSmall"
+                android:textColor="?attr/colorOnSurface"
+                android:visibility="gone" />
+        </LinearLayout>
     </FrameLayout>
 
     <TextView

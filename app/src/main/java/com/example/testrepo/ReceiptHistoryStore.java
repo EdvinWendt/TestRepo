@@ -28,6 +28,7 @@ final class ReceiptHistoryStore {
     private static final String KEY_PARTICIPANT_COLOR = "color";
     private static final String KEY_PARTICIPANT_PHONE = "phone";
     private static final String KEY_PARTICIPANT_IS_CROWNED = "is_crowned";
+    private static final String KEY_PARTICIPANT_HAS_PAID = "has_paid";
     private static final String KEY_ITEM_NAME = "name";
     private static final String KEY_ITEM_PRICE = "price";
     private static final String KEY_ITEM_SELECTED_PARTICIPANT_KEYS = "selected_participant_keys";
@@ -51,6 +52,43 @@ final class ReceiptHistoryStore {
             }
         }
         return false;
+    }
+
+    @NonNull
+    static HistoryEntry markParticipantPaid(
+            @NonNull Context context,
+            @NonNull HistoryEntry targetEntry,
+            @NonNull String participantKey,
+            boolean hasPaid
+    ) {
+        ArrayList<HistoryEntry> entries = loadEntries(context);
+        for (int index = 0; index < entries.size(); index++) {
+            HistoryEntry existingEntry = entries.get(index);
+            if (!existingEntry.matches(targetEntry)) {
+                continue;
+            }
+
+            ArrayList<ParticipantShare> updatedParticipants = new ArrayList<>();
+            for (ParticipantShare participant : existingEntry.participants) {
+                updatedParticipants.add(participant.key.equals(participantKey)
+                        ? participant.copyWithPaidStatus(hasPaid)
+                        : participant);
+            }
+
+            HistoryEntry updatedEntry = new HistoryEntry(
+                    existingEntry.receiptName,
+                    existingEntry.totalAmount,
+                    existingEntry.sentDate,
+                    existingEntry.message,
+                    updatedParticipants,
+                    existingEntry.items
+            );
+            entries.set(index, updatedEntry);
+            saveEntries(context, entries);
+            return updatedEntry;
+        }
+
+        return targetEntry;
     }
 
     private static void saveEntries(
@@ -126,7 +164,7 @@ final class ReceiptHistoryStore {
         }
 
         @NonNull
-        private JSONObject toJson() {
+        JSONObject toJson() {
             JSONObject object = new JSONObject();
             JSONArray participantArray = new JSONArray();
             JSONArray itemArray = new JSONArray();
@@ -152,7 +190,7 @@ final class ReceiptHistoryStore {
         }
 
         @NonNull
-        private static HistoryEntry fromJson(@NonNull JSONObject object) {
+        static HistoryEntry fromJson(@NonNull JSONObject object) {
             JSONArray participantArray = object.optJSONArray(KEY_PARTICIPANTS);
             ArrayList<ParticipantShare> participants = new ArrayList<>();
             if (participantArray != null) {
@@ -221,6 +259,7 @@ final class ReceiptHistoryStore {
         final String phoneNumber;
         final String amount;
         final boolean isCrowned;
+        final boolean hasPaid;
 
         ParticipantShare(
                 @NonNull String key,
@@ -229,7 +268,8 @@ final class ReceiptHistoryStore {
                 int color,
                 @NonNull String phoneNumber,
                 @NonNull String amount,
-                boolean isCrowned
+                boolean isCrowned,
+                boolean hasPaid
         ) {
             this.key = key;
             this.name = name;
@@ -238,6 +278,7 @@ final class ReceiptHistoryStore {
             this.phoneNumber = phoneNumber;
             this.amount = amount;
             this.isCrowned = isCrowned;
+            this.hasPaid = hasPaid;
         }
 
         @NonNull
@@ -251,6 +292,7 @@ final class ReceiptHistoryStore {
                 object.put(KEY_PARTICIPANT_PHONE, phoneNumber);
                 object.put(KEY_PARTICIPANT_AMOUNT, amount);
                 object.put(KEY_PARTICIPANT_IS_CROWNED, isCrowned);
+                object.put(KEY_PARTICIPANT_HAS_PAID, hasPaid);
             } catch (JSONException exception) {
                 throw new IllegalStateException("Unable to serialize participant share", exception);
             }
@@ -272,7 +314,22 @@ final class ReceiptHistoryStore {
                             : createParticipantColor(fallbackIndex),
                     object.optString(KEY_PARTICIPANT_PHONE, ""),
                     object.optString(KEY_PARTICIPANT_AMOUNT, ""),
-                    object.optBoolean(KEY_PARTICIPANT_IS_CROWNED, false)
+                    object.optBoolean(KEY_PARTICIPANT_IS_CROWNED, false),
+                    object.optBoolean(KEY_PARTICIPANT_HAS_PAID, false)
+            );
+        }
+
+        @NonNull
+        ParticipantShare copyWithPaidStatus(boolean hasPaid) {
+            return new ParticipantShare(
+                    key,
+                    name,
+                    initials,
+                    color,
+                    phoneNumber,
+                    amount,
+                    isCrowned,
+                    hasPaid
             );
         }
 
@@ -283,7 +340,8 @@ final class ReceiptHistoryStore {
                     && color == other.color
                     && phoneNumber.equals(other.phoneNumber)
                     && amount.equals(other.amount)
-                    && isCrowned == other.isCrowned;
+                    && isCrowned == other.isCrowned
+                    && hasPaid == other.hasPaid;
         }
     }
 

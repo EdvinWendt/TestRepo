@@ -34,6 +34,7 @@
         android:focusable="false"
         android:padding="8dp"
         android:scaleType="centerInside"
+        android:tint="?android:attr/textColorPrimary"
         app:srcCompat="@drawable/star_false" />
 
     <LinearLayout
@@ -52,7 +53,7 @@
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
             android:textAppearance="?attr/textAppearanceTitleMedium"
-            android:textColor="@android:color/white"
+            android:textColor="?attr/colorOnSurface"
             android:textStyle="bold" />
 
         <TextView

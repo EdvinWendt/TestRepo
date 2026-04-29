@@ -44,7 +44,10 @@ public class ManagePermissionsDialogFragment extends DialogFragment {
 
     @Override
     public int getTheme() {
-        return R.style.TestRepo_FullScreenDialog;
+        if (getContext() == null) {
+            return R.style.TestRepo_FullScreenDialog;
+        }
+        return AppSettings.getFullScreenDialogThemeResId(requireContext());
     }
 
     @Nullable

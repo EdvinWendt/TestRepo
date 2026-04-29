@@ -30,7 +30,7 @@
             android:contentDescription="@string/close"
             android:padding="8dp"
             android:scaleType="center"
-            android:tint="@android:color/white"
+            android:tint="?attr/colorOnPrimary"
             app:srcCompat="@drawable/ic_close" />
 
         <TextView
@@ -40,7 +40,7 @@
             android:layout_centerInParent="true"
             android:text="@string/receipt_summary_title"
             android:textAppearance="?attr/textAppearanceTitleLarge"
-            android:textColor="@android:color/white"
+            android:textColor="?attr/colorOnPrimary"
             android:textStyle="bold" />
     </RelativeLayout>
 
@@ -86,12 +86,29 @@
                 android:maxLines="1" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/button_send_requests"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="@string/send_requests" />
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/button_add_to_archive"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:text="@string/add_to_archive" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/button_send_requests"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="@string/send_requests" />
+        </LinearLayout>
     </LinearLayout>
 
 </LinearLayout>

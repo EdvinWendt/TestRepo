@@ -11,37 +11,90 @@
         android:gravity="center"
         android:orientation="vertical">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:text="@string/home_title"
-            android:textAppearance="?attr/textAppearanceHeadlineMedium"
-            android:textStyle="bold" />
-
-        <TextView
-            android:layout_width="wrap_content"
+        <ImageView
+            android:layout_width="280dp"
             android:layout_height="wrap_content"
             android:layout_marginBottom="32dp"
-            android:gravity="center"
-            android:text="@string/home_subtitle"
-            android:textAppearance="?attr/textAppearanceBodyLarge" />
+            android:adjustViewBounds="true"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter"
+            android:src="@drawable/home_brand_kvitt" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/button_new_receipt"
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            android:text="@string/button_new_receipt"
-            app:cornerRadius="16dp" />
+            android:layout_marginBottom="16dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/button_history"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/button_new_receipt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/button_new_receipt"
+                app:cornerRadius="16dp" />
+
+            <androidx.appcompat.widget.AppCompatImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_gravity="start|center_vertical"
+                android:layout_marginStart="20dp"
+                android:clickable="false"
+                android:contentDescription="@null"
+                android:focusable="false"
+                android:scaleType="fitCenter"
+                app:srcCompat="@drawable/ic_main_new_receipt"
+                app:tint="@null" />
+        </FrameLayout>
+
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/button_history"
-            app:cornerRadius="16dp" />
+            android:layout_marginBottom="16dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/button_archive"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/button_archive"
+                app:cornerRadius="16dp" />
+
+            <androidx.appcompat.widget.AppCompatImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_gravity="start|center_vertical"
+                android:layout_marginStart="20dp"
+                android:clickable="false"
+                android:contentDescription="@null"
+                android:focusable="false"
+                android:scaleType="fitCenter"
+                app:srcCompat="@drawable/ic_main_archive"
+                app:tint="?attr/colorPrimary" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/button_history"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/button_history"
+                app:cornerRadius="16dp" />
+
+            <androidx.appcompat.widget.AppCompatImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_gravity="start|center_vertical"
+                android:layout_marginStart="20dp"
+                android:clickable="false"
+                android:contentDescription="@null"
+                android:focusable="false"
+                android:scaleType="fitCenter"
+                app:srcCompat="@drawable/ic_main_history"
+                app:tint="?attr/colorPrimary" />
+        </FrameLayout>
     </LinearLayout>
 
     <androidx.appcompat.widget.AppCompatImageButton

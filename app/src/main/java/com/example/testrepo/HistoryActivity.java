@@ -1,15 +1,26 @@
 package com.example.testrepo;
+import android.app.Dialog;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
-import android.graphics.Paint;
+import android.graphics.drawable.ColorDrawable;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.os.VibratorManager;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewConfiguration;
+import android.view.Window;
 import android.widget.ArrayAdapter;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -21,6 +32,7 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.AppCompatImageButton;
+import androidx.appcompat.widget.AppCompatImageView;
 import androidx.core.content.ContextCompat;
 import androidx.core.widget.TextViewCompat;
 
@@ -36,13 +48,19 @@ import java.util.List;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.RelativeSizeSpan;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 public class HistoryActivity extends AppCompatActivity {
     private static final int INITIAL_VISIBLE_HISTORY_COUNT = 5;
     private static final int HISTORY_PAGE_SIZE = 5;
     private static final int MAX_ITEM_PARTICIPANT_BUTTONS_PER_ROW = 4;
     private static final int UNCHECKED_PARTICIPANT_COLOR = 0xFF8A8A8A;
+    private static final long HISTORY_ENTRY_LONG_PRESS_DURATION_MS = 750L;
+    private static final long HISTORY_ENTRY_LONG_PRESS_VIBRATION_DURATION_MS = 40L;
     private static final String DEFAULT_PARTICIPANT_KEY = "participant_you";
     private static final String DEFAULT_PARTICIPANT_NAME = "You";
+    private static final String SWISH_PAYMENT_URL_PREFIX = "swish://payment?data=";
 
     private final ArrayList<ReceiptHistoryStore.HistoryEntry> historyEntries = new ArrayList<>();
     private final ArrayList<ReceiptHistoryStore.HistoryEntry> visibleHistoryEntries = new ArrayList<>();
@@ -52,6 +70,7 @@ public class HistoryActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
+        AppSettings.applyTheme(this);
         super.onCreate(savedInstanceState);
         InstallResetHelper.resetInstallScopedDataIfNeeded(this);
         setContentView(R.layout.activity_history);
@@ -70,12 +89,6 @@ public class HistoryActivity extends AppCompatActivity {
         historyEntriesAdapter = new HistoryEntriesAdapter();
         historyListView.setAdapter(historyEntriesAdapter);
         historyListView.setEmptyView(findViewById(R.id.text_history_empty));
-        historyListView.setOnItemClickListener((parent, view, position, id) -> {
-            ReceiptHistoryStore.HistoryEntry entry = historyEntriesAdapter.getItem(position);
-            if (entry != null) {
-                showHistoryDetailsDialog(entry);
-            }
-        });
         backButton.setOnClickListener(view -> finish());
         settingsMenuButton.setOnClickListener(
                 view -> SettingsMenuHelper.showSettingsMenu(this, view)
@@ -129,12 +142,10 @@ public class HistoryActivity extends AppCompatActivity {
                 .inflate(R.layout.dialog_history_receipt_details, null);
         TextView titleView = dialogView.findViewById(R.id.text_history_receipt_dialog_title);
         TextView messageView = dialogView.findViewById(R.id.text_history_receipt_dialog_message);
-        AppCompatImageButton removeButton =
-                dialogView.findViewById(R.id.button_history_receipt_remove);
+        AppCompatImageButton closeButton =
+                dialogView.findViewById(R.id.button_close_history_receipt);
         LinearLayout participantsLayout =
                 dialogView.findViewById(R.id.layout_history_receipt_participants);
-        TextView toggleItemsView =
-                dialogView.findViewById(R.id.text_history_receipt_toggle_items);
         MaterialCardView itemsCard = dialogView.findViewById(R.id.card_history_receipt_items);
         LinearLayout itemsLayout = dialogView.findViewById(R.id.layout_history_receipt_items);
 
@@ -151,45 +162,67 @@ public class HistoryActivity extends AppCompatActivity {
         bindHistoryParticipantButtons(participantsLayout, entry);
 
         if (entry.items.isEmpty()) {
-            toggleItemsView.setVisibility(View.GONE);
             itemsCard.setVisibility(View.GONE);
         } else {
             bindHistoryReceiptItems(itemsLayout, entry);
-            toggleItemsView.setVisibility(View.VISIBLE);
-            toggleItemsView.setText(R.string.show_more);
-            toggleItemsView.setPaintFlags(
-                    toggleItemsView.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG
-            );
-            itemsCard.setVisibility(View.GONE);
-            toggleItemsView.setOnClickListener(view -> {
-                boolean shouldExpand = itemsCard.getVisibility() != View.VISIBLE;
-                itemsCard.setVisibility(shouldExpand ? View.VISIBLE : View.GONE);
-                toggleItemsView.setText(shouldExpand ? R.string.show_less : R.string.show_more);
-            });
+            itemsCard.setVisibility(View.VISIBLE);
         }
 
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setView(dialogView)
-                .create();
-        removeButton.setOnClickListener(view -> {
-            showDeleteHistoryDialog(entry, dialog);
-        });
+        Dialog dialog = new Dialog(this, AppSettings.getAppThemeResId(this));
+        dialog.setContentView(dialogView);
+        closeButton.setOnClickListener(view -> dialog.dismiss());
         dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+            );
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
     }
 
     private void showDeleteHistoryDialog(
             @NonNull ReceiptHistoryStore.HistoryEntry entry,
-            @NonNull AlertDialog historyDetailsDialog
+            @Nullable Dialog historyDetailsDialog
     ) {
-        new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.delete_history_title)
-                .setMessage(getString(R.string.delete_history_message, entry.receiptName))
-                .setNegativeButton(R.string.back, null)
-                .setPositiveButton(R.string.delete, (dialogInterface, which) -> {
-                    historyDetailsDialog.dismiss();
-                    removeHistoryEntry(entry);
-                })
-                .show();
+        View dialogView = getLayoutInflater().inflate(
+                R.layout.dialog_history_remove_confirmation,
+                null
+        );
+        MaterialButton noButton = dialogView.findViewById(R.id.button_history_remove_no);
+        MaterialButton yesButton = dialogView.findViewById(R.id.button_history_remove_yes);
+
+        AlertDialog confirmationDialog = new MaterialAlertDialogBuilder(this)
+                .setView(dialogView)
+                .create();
+
+        noButton.setOnClickListener(view -> confirmationDialog.dismiss());
+        yesButton.setOnClickListener(view -> {
+            confirmationDialog.dismiss();
+            if (historyDetailsDialog != null) {
+                historyDetailsDialog.dismiss();
+            }
+            removeHistoryEntry(entry);
+        });
+
+        confirmationDialog.show();
+    }
+
+    private void showHistoryEntryActionsMenu(
+            @NonNull View anchorView,
+            float rawTouchX,
+            float rawTouchY,
+            @NonNull ReceiptHistoryStore.HistoryEntry entry
+    ) {
+        AnchoredDropdownMenuHelper.showSingleActionMenu(
+                anchorView,
+                rawTouchX,
+                rawTouchY,
+                R.string.remove,
+                R.drawable.ic_history_remove,
+                () -> showDeleteHistoryDialog(entry, null)
+        );
     }
 
     private void removeHistoryEntry(@NonNull ReceiptHistoryStore.HistoryEntry entry) {
@@ -232,14 +265,33 @@ public class HistoryActivity extends AppCompatActivity {
                     false
             );
             MaterialButton badgeButton = rowView.findViewById(R.id.button_summary_participant_badge);
+            AppCompatImageView paymentStatusIconView =
+                    rowView.findViewById(R.id.image_summary_participant_payment_status);
+            AppCompatImageView ownerIconView =
+                    rowView.findViewById(R.id.image_summary_participant_owner);
             TextView nameView = rowView.findViewById(R.id.text_summary_participant_name);
             TextView amountView = rowView.findViewById(R.id.text_summary_participant_amount);
+            MaterialButton payNowButton =
+                    rowView.findViewById(R.id.button_summary_participant_pay_now);
             View dividerView = rowView.findViewById(R.id.view_summary_participant_divider);
+            boolean isOwner = isCrownedParticipant(participant);
 
             configureHistoryParticipantBadgeButton(badgeButton, participant, true);
+            bindHistoryParticipantPaymentStatusIcon(paymentStatusIconView, participant);
+            ownerIconView.setVisibility(
+                    isOwner ? View.VISIBLE : View.GONE
+            );
             nameView.setText(participant.name);
             amountView.setText(
                     buildHistoryParticipantTotalDisplayText(participant.amount, entry.totalAmount)
+            );
+            payNowButton.setVisibility(isOwner ? View.VISIBLE : View.GONE);
+            payNowButton.setEnabled(!isDefaultParticipant(participant));
+            payNowButton.setOnClickListener(
+                    view -> {
+                        openSwishForHistoryEntry(entry, participant);
+                        bindHistoryParticipantButtons(participantsLayout, entry);
+                    }
             );
             dividerView.setVisibility(index == participants.size() - 1 ? View.GONE : View.VISIBLE);
 
@@ -275,12 +327,7 @@ public class HistoryActivity extends AppCompatActivity {
         participantButton.setPadding(0, 0, 0, 0);
         participantButton.setCornerRadius(buttonSize / 2);
         applyParticipantBadgeTextStyle(participantButton, participant, false);
-        if (isCrownedParticipant(participant)) {
-            participantButton.setStrokeWidth(dpToPx(2));
-            participantButton.setStrokeColor(ColorStateList.valueOf(Color.WHITE));
-        } else {
-            participantButton.setStrokeWidth(0);
-        }
+        participantButton.setStrokeWidth(0);
         participantButton.setBackgroundTintList(ColorStateList.valueOf(participant.color));
         participantButton.setTextColor(getParticipantTextColor(participant.color));
         participantButton.setContentDescription(participant.name);
@@ -533,6 +580,146 @@ public class HistoryActivity extends AppCompatActivity {
         return participant.isCrowned;
     }
 
+    private void bindHistoryParticipantPaymentStatusIcon(
+            @NonNull AppCompatImageView paymentStatusIconView,
+            @NonNull ReceiptHistoryStore.ParticipantShare participant
+    ) {
+        if (isCrownedParticipant(participant)) {
+            paymentStatusIconView.setVisibility(View.GONE);
+            return;
+        }
+
+        paymentStatusIconView.setVisibility(View.VISIBLE);
+        if (participant.hasPaid) {
+            paymentStatusIconView.setImageResource(R.drawable.ic_history_participant_paid);
+            paymentStatusIconView.setImageTintList(ColorStateList.valueOf(
+                    ContextCompat.getColor(this, R.color.brand_green)
+            ));
+        } else {
+            paymentStatusIconView.setImageResource(R.drawable.ic_history_participant_unpaid);
+            paymentStatusIconView.setImageTintList(ColorStateList.valueOf(
+                    resolveThemeColor(com.google.android.material.R.attr.colorError, Color.RED)
+            ));
+        }
+    }
+
+    @NonNull
+    private BigDecimal getDefaultParticipantShareAmount(
+            @NonNull List<ReceiptHistoryStore.ParticipantShare> participants
+    ) {
+        for (ReceiptHistoryStore.ParticipantShare participant : participants) {
+            if (isDefaultParticipant(participant)) {
+                return parseCurrencyAmount(participant.amount);
+            }
+        }
+        return BigDecimal.ZERO;
+    }
+
+    private void openSwishForHistoryEntry(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull ReceiptHistoryStore.ParticipantShare ownerParticipant
+    ) {
+        String normalizedPhoneNumber = normalizePhoneNumberForSwish(ownerParticipant.phoneNumber);
+        if (normalizedPhoneNumber.isEmpty()) {
+            Toast.makeText(
+                    this,
+                    R.string.pay_now_owner_phone_unavailable,
+                    Toast.LENGTH_SHORT
+            ).show();
+            return;
+        }
+
+        BigDecimal yourShareAmount = getDefaultParticipantShareAmount(entry.participants);
+        if (yourShareAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            Toast.makeText(this, R.string.pay_now_nothing_to_pay, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            Intent swishIntent = new Intent(
+                    Intent.ACTION_VIEW,
+                    buildSwishPaymentUri(
+                            normalizedPhoneNumber,
+                            yourShareAmount,
+                            entry.receiptName
+                    )
+            );
+            startActivity(swishIntent);
+            markDefaultParticipantAsPaid(entry);
+        } catch (ActivityNotFoundException | JSONException exception) {
+            Toast.makeText(this, R.string.pay_now_open_swish_failed, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void markDefaultParticipantAsPaid(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry
+    ) {
+        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.markParticipantPaid(
+                this,
+                entry,
+                DEFAULT_PARTICIPANT_KEY,
+                true
+        );
+
+        entry.participants.clear();
+        entry.participants.addAll(updatedEntry.participants);
+    }
+
+    @NonNull
+    private Uri buildSwishPaymentUri(
+            @NonNull String phoneNumber,
+            @NonNull BigDecimal amount,
+            @NonNull String receiptName
+    ) throws JSONException {
+        JSONObject payeeObject = new JSONObject();
+        payeeObject.put("value", phoneNumber);
+
+        JSONObject amountObject = new JSONObject();
+        amountObject.put(
+                "value",
+                amount.setScale(2, RoundingMode.HALF_UP).stripTrailingZeros()
+        );
+
+        JSONObject paymentObject = new JSONObject();
+        paymentObject.put("version", 1);
+        paymentObject.put("payee", payeeObject);
+        paymentObject.put("amount", amountObject);
+
+        String normalizedMessage = normalizeWhitespace(receiptName);
+        if (!normalizedMessage.isEmpty()) {
+            JSONObject messageObject = new JSONObject();
+            messageObject.put("value", normalizedMessage);
+            paymentObject.put("message", messageObject);
+        }
+
+        return Uri.parse(SWISH_PAYMENT_URL_PREFIX + Uri.encode(paymentObject.toString()));
+    }
+
+    @NonNull
+    private String normalizePhoneNumberForSwish(@Nullable String phoneNumber) {
+        String trimmedPhoneNumber = normalizeWhitespace(phoneNumber);
+        boolean hasInternationalPrefix = trimmedPhoneNumber.startsWith("+");
+        String digitsOnlyPhoneNumber = trimmedPhoneNumber.replaceAll("\\D", "");
+
+        if (digitsOnlyPhoneNumber.isEmpty()) {
+            return "";
+        }
+
+        if (hasInternationalPrefix) {
+            return "+" + digitsOnlyPhoneNumber;
+        }
+        if (digitsOnlyPhoneNumber.startsWith("00")) {
+            return "+" + digitsOnlyPhoneNumber.substring(2);
+        }
+        if (digitsOnlyPhoneNumber.startsWith("46")) {
+            return "+" + digitsOnlyPhoneNumber;
+        }
+        if (digitsOnlyPhoneNumber.startsWith("0")) {
+            return "+46" + digitsOnlyPhoneNumber.substring(1);
+        }
+        return digitsOnlyPhoneNumber;
+    }
+
     @NonNull
     private String getParticipantBadgeLabel(@NonNull ReceiptHistoryStore.ParticipantShare participant) {
         if (isDefaultParticipant(participant)) {
@@ -647,6 +834,33 @@ public class HistoryActivity extends AppCompatActivity {
         ));
     }
 
+    private void vibrateForHistoryLongPress() {
+        Vibrator vibrator = null;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            VibratorManager vibratorManager = getSystemService(VibratorManager.class);
+            if (vibratorManager != null) {
+                vibrator = vibratorManager.getDefaultVibrator();
+            }
+        } else {
+            vibrator = getSystemService(Vibrator.class);
+        }
+
+        if (vibrator == null || !vibrator.hasVibrator()) {
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(
+                    VibrationEffect.createOneShot(
+                            HISTORY_ENTRY_LONG_PRESS_VIBRATION_DURATION_MS,
+                            VibrationEffect.DEFAULT_AMPLITUDE
+                    )
+            );
+        } else {
+            vibrator.vibrate(HISTORY_ENTRY_LONG_PRESS_VIBRATION_DURATION_MS);
+        }
+    }
+
     private final class HistoryEntriesAdapter extends ArrayAdapter<ReceiptHistoryStore.HistoryEntry> {
         private HistoryEntriesAdapter() {
             super(HistoryActivity.this, R.layout.item_history_receipt, visibleHistoryEntries);
@@ -670,6 +884,65 @@ public class HistoryActivity extends AppCompatActivity {
                 receiptNameView.setText(entry.receiptName);
                 totalAmountView.setText(entry.totalAmount);
                 sentDateView.setText(entry.sentDate);
+            }
+
+            if (entry != null) {
+                View historyItemView = itemView;
+                itemView.setClickable(true);
+                itemView.setFocusable(true);
+                itemView.setOnClickListener(view -> showHistoryDetailsDialog(entry));
+                itemView.setOnTouchListener(new View.OnTouchListener() {
+                    private final int touchSlop = ViewConfiguration
+                            .get(HistoryActivity.this)
+                            .getScaledTouchSlop();
+                    private float downX;
+                    private float downY;
+                    private float downRawX;
+                    private float downRawY;
+                    private boolean longPressTriggered;
+                    private final Runnable longPressRunnable = () -> {
+                        longPressTriggered = true;
+                        vibrateForHistoryLongPress();
+                        showHistoryEntryActionsMenu(
+                                historyItemView,
+                                downRawX,
+                                downRawY,
+                                entry
+                        );
+                    };
+
+                    @Override
+                    public boolean onTouch(View view, MotionEvent event) {
+                        switch (event.getActionMasked()) {
+                            case MotionEvent.ACTION_DOWN:
+                                downX = event.getX();
+                                downY = event.getY();
+                                downRawX = event.getRawX();
+                                downRawY = event.getRawY();
+                                longPressTriggered = false;
+                                view.postDelayed(
+                                        longPressRunnable,
+                                        HISTORY_ENTRY_LONG_PRESS_DURATION_MS
+                                );
+                                return false;
+                            case MotionEvent.ACTION_MOVE:
+                                if (Math.abs(event.getX() - downX) > touchSlop
+                                        || Math.abs(event.getY() - downY) > touchSlop) {
+                                    view.removeCallbacks(longPressRunnable);
+                                }
+                                return false;
+                            case MotionEvent.ACTION_UP:
+                            case MotionEvent.ACTION_CANCEL:
+                                view.removeCallbacks(longPressRunnable);
+                                return longPressTriggered;
+                            default:
+                                return false;
+                        }
+                    }
+                });
+            } else {
+                itemView.setOnClickListener(null);
+                itemView.setOnTouchListener(null);
             }
 
             return itemView;

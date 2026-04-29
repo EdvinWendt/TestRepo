@@ -10,6 +10,7 @@ import androidx.appcompat.app.AppCompatActivity;
 public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
+        AppSettings.applyTheme(this);
         super.onCreate(savedInstanceState);
         InstallResetHelper.resetInstallScopedDataIfNeeded(this);
         setContentView(R.layout.activity_main);
@@ -27,6 +28,9 @@ public class MainActivity extends AppCompatActivity {
         View settingsMenuButton = findViewById(R.id.button_main_actions);
         findViewById(R.id.button_new_receipt).setOnClickListener(
                 view -> startActivity(new Intent(this, NewReceiptActivity.class))
+        );
+        findViewById(R.id.button_archive).setOnClickListener(
+                view -> startActivity(new Intent(this, ArchiveActivity.class))
         );
         findViewById(R.id.button_history).setOnClickListener(
                 view -> startActivity(new Intent(this, HistoryActivity.class))

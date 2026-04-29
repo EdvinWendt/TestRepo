@@ -29,7 +29,7 @@
             android:contentDescription="@string/close"
             android:padding="8dp"
             android:scaleType="center"
-            android:tint="@android:color/white"
+            android:tint="?attr/colorOnPrimary"
             app:srcCompat="@drawable/ic_close" />
 
         <TextView
@@ -38,7 +38,7 @@
             android:layout_centerInParent="true"
             android:text="@string/add_participant"
             android:textAppearance="?attr/textAppearanceTitleLarge"
-            android:textColor="@android:color/white"
+            android:textColor="?attr/colorOnPrimary"
             android:textStyle="bold" />
     </RelativeLayout>
 
@@ -60,7 +60,7 @@
             android:hint="@string/contact_name_hint"
             app:endIconDrawable="@drawable/ic_search_contact_name"
             app:endIconMode="custom"
-            app:endIconTint="@android:color/white">
+            app:endIconTint="?attr/colorOnSurfaceVariant">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/input_participant_name"
@@ -89,9 +89,10 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            app:cardBackgroundColor="#1F1F1F"
+            app:cardBackgroundColor="?attr/colorSurface"
             app:cardCornerRadius="20dp"
-            app:strokeWidth="0dp">
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:strokeWidth="1dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -108,7 +109,7 @@
                     android:paddingEnd="20dp"
                     android:text="@string/phone_contacts_title"
                     android:textAppearance="?attr/textAppearanceTitleSmall"
-                    android:textColor="@android:color/white"
+                    android:textColor="?attr/colorOnSurface"
                     android:textStyle="bold" />
 
                 <FrameLayout

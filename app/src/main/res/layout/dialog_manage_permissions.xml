@@ -26,7 +26,7 @@
             android:contentDescription="@string/close"
             android:padding="8dp"
             android:scaleType="center"
-            android:tint="@android:color/white"
+            android:tint="?attr/colorOnPrimary"
             app:srcCompat="@drawable/ic_close" />
 
         <TextView
@@ -35,7 +35,7 @@
             android:layout_centerInParent="true"
             android:text="@string/manage_permissions_title"
             android:textAppearance="?attr/textAppearanceTitleLarge"
-            android:textColor="@android:color/white"
+            android:textColor="?attr/colorOnPrimary"
             android:textStyle="bold" />
     </RelativeLayout>
 
@@ -54,9 +54,10 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="#1F1F1F"
+                app:cardBackgroundColor="?attr/colorSurface"
                 app:cardCornerRadius="20dp"
-                app:strokeWidth="0dp">
+                app:strokeColor="?attr/colorOutlineVariant"
+                app:strokeWidth="1dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -84,7 +85,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/permission_contacts_title"
                                 android:textAppearance="?attr/textAppearanceTitleMedium"
-                                android:textColor="@android:color/white"
+                                android:textColor="?attr/colorOnSurface"
                                 android:textStyle="bold" />
 
                             <TextView
@@ -93,7 +94,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="6dp"
                                 android:textAppearance="?attr/textAppearanceBodyMedium"
-                                android:textColor="#B3B3B3" />
+                                android:textColor="?attr/colorOnSurfaceVariant" />
                         </LinearLayout>
 
                         <com.google.android.material.button.MaterialButton
@@ -111,7 +112,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="1dp"
                         android:layout_marginTop="18dp"
-                        android:background="#33FFFFFF" />
+                        android:background="?attr/colorOutlineVariant" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -133,7 +134,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/permission_camera_title"
                                 android:textAppearance="?attr/textAppearanceTitleMedium"
-                                android:textColor="@android:color/white"
+                                android:textColor="?attr/colorOnSurface"
                                 android:textStyle="bold" />
 
                             <TextView
@@ -142,7 +143,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="6dp"
                                 android:textAppearance="?attr/textAppearanceBodyMedium"
-                                android:textColor="#B3B3B3" />
+                                android:textColor="?attr/colorOnSurfaceVariant" />
                         </LinearLayout>
 
                         <com.google.android.material.button.MaterialButton
@@ -160,7 +161,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="1dp"
                         android:layout_marginTop="18dp"
-                        android:background="#33FFFFFF" />
+                        android:background="?attr/colorOutlineVariant" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -182,7 +183,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/permission_sms_title"
                                 android:textAppearance="?attr/textAppearanceTitleMedium"
-                                android:textColor="@android:color/white"
+                                android:textColor="?attr/colorOnSurface"
                                 android:textStyle="bold" />
 
                             <TextView
@@ -191,7 +192,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="6dp"
                                 android:textAppearance="?attr/textAppearanceBodyMedium"
-                                android:textColor="#B3B3B3" />
+                                android:textColor="?attr/colorOnSurfaceVariant" />
                         </LinearLayout>
 
                         <com.google.android.material.button.MaterialButton

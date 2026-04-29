@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/dialog_horizontal_padding"
+    android:paddingTop="@dimen/dialog_vertical_padding"
+    android:paddingEnd="@dimen/dialog_horizontal_padding"
+    android:paddingBottom="@dimen/dialog_vertical_padding">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="280dp">
+
+        <ListView
+            android:id="@+id/list_select_archive"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:choiceMode="singleChoice" />
+
+        <TextView
+            android:id="@+id/text_select_archive_empty"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:padding="24dp"
+            android:text="@string/select_archive_empty"
+            android:textAppearance="?attr/textAppearanceBodyLarge"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_add_selected_archive"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:enabled="false"
+        android:text="@string/add" />
+
+</LinearLayout>

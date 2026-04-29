@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.Rect;
 import android.os.Bundle;
 import android.provider.ContactsContract;
@@ -21,7 +22,6 @@ import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -91,6 +91,8 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         participantButtonsLayout = view.findViewById(R.id.layout_pre_added_participant_buttons);
+        View addParticipantButton = view.findViewById(R.id.button_open_add_pre_added_participant);
+        addParticipantButton.setOnClickListener(buttonView -> openAddParticipantDialog());
         refreshParticipantButtons();
     }
 
@@ -103,6 +105,7 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
             );
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             dialog.getWindow().setWindowAnimations(R.style.TestRepo_DialogAnimation);
         }
     }
@@ -131,8 +134,6 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
                     )
             );
         }
-        participantBadgeButtons.add(createAddParticipantBadgeButton(buttonSize, buttonSpacing));
-
         LinearLayout currentRow = null;
         for (int index = 0; index < participantBadgeButtons.size(); index++) {
             if (index % MAX_PARTICIPANT_BUTTONS_PER_ROW == 0) {
@@ -188,22 +189,6 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
         participantButton.setContentDescription(participant.name);
         participantButton.setOnClickListener(view -> showParticipantOptionsDialog(participant));
         return participantButton;
-    }
-
-    @NonNull
-    private AppCompatImageButton createAddParticipantBadgeButton(int buttonSize, int buttonSpacing) {
-        AppCompatImageButton addParticipantButton = new AppCompatImageButton(requireContext());
-        LinearLayout.LayoutParams addButtonLayoutParams =
-                new LinearLayout.LayoutParams(buttonSize, buttonSize);
-        addButtonLayoutParams.setMargins(buttonSpacing, 0, buttonSpacing, 0);
-        addParticipantButton.setLayoutParams(addButtonLayoutParams);
-        addParticipantButton.setBackgroundColor(Color.TRANSPARENT);
-        addParticipantButton.setImageResource(R.drawable.ic_add_participant_badge);
-        addParticipantButton.setScaleType(ImageView.ScaleType.CENTER);
-        addParticipantButton.setPadding(0, 0, 0, 0);
-        addParticipantButton.setContentDescription(getString(R.string.add_participant));
-        addParticipantButton.setOnClickListener(view -> openAddParticipantDialog());
-        return addParticipantButton;
     }
 
     private void openAddParticipantDialog() {
@@ -303,7 +288,10 @@ public class PreAddedParticipantsDialogFragment extends DialogFragment {
                 addParticipantButton
         );
 
-        Dialog dialog = new Dialog(requireContext(), R.style.TestRepo_FullScreenDialog);
+        Dialog dialog = new Dialog(
+                requireContext(),
+                AppSettings.getFullScreenDialogThemeResId(requireContext())
+        );
         dialog.setContentView(dialogView);
         dialog.setCancelable(true);
         closeButton.setOnClickListener(view -> dialog.dismiss());
