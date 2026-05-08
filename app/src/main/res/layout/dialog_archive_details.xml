@@ -136,9 +136,8 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/button_archive_send_requests"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
             android:layout_marginTop="20dp"
             android:text="@string/archive_summary" />
     </LinearLayout>

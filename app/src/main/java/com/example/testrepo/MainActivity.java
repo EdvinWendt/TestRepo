@@ -4,13 +4,18 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
 public class MainActivity extends AppCompatActivity {
+    @NonNull
+    private String appliedThemeConfigurationKey = "";
+
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         AppSettings.applyTheme(this);
+        appliedThemeConfigurationKey = AppSettings.getThemeConfigurationKey(this);
         super.onCreate(savedInstanceState);
         InstallResetHelper.resetInstallScopedDataIfNeeded(this);
         setContentView(R.layout.activity_main);
@@ -44,6 +49,21 @@ public class MainActivity extends AppCompatActivity {
     protected void onStart() {
         super.onStart();
         promptForRequiredUsernameIfNeeded();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        recreateIfThemeConfigurationChanged();
+    }
+
+    private void recreateIfThemeConfigurationChanged() {
+        String currentThemeConfigurationKey = AppSettings.getThemeConfigurationKey(this);
+        if (currentThemeConfigurationKey.equals(appliedThemeConfigurationKey)) {
+            return;
+        }
+
+        recreate();
     }
 
     private void promptForRequiredUsernameIfNeeded() {

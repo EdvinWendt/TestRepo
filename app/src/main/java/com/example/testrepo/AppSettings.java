@@ -103,6 +103,13 @@ public final class AppSettings {
                 : R.style.TestRepo_FullScreenDialog_Green;
     }
 
+    @NonNull
+    public static String getThemeConfigurationKey(@NonNull Context context) {
+        return (isDarkThemeEnabled(context) ? "dark" : "light")
+                + "|"
+                + getAccentColor(context);
+    }
+
     public static boolean isSplitItemsEnabled(@NonNull Context context) {
         return getPreferences(context)
                 .getBoolean(KEY_SPLIT_ITEMS, DEFAULT_SPLIT_ITEMS_ENABLED);

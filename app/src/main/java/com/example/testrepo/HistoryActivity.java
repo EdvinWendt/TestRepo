@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -43,6 +44,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import java.util.ArrayList;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 import android.text.style.ForegroundColorSpan;
@@ -52,6 +54,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 public class HistoryActivity extends AppCompatActivity {
+    private static final int RECEIPT_PAYMENT_STATUS_NONE = 0;
+    private static final int RECEIPT_PAYMENT_STATUS_PARTIAL = 1;
+    private static final int RECEIPT_PAYMENT_STATUS_ALL = 2;
     private static final int INITIAL_VISIBLE_HISTORY_COUNT = 5;
     private static final int HISTORY_PAGE_SIZE = 5;
     private static final int MAX_ITEM_PARTICIPANT_BUTTONS_PER_ROW = 4;
@@ -61,9 +66,14 @@ public class HistoryActivity extends AppCompatActivity {
     private static final String DEFAULT_PARTICIPANT_KEY = "participant_you";
     private static final String DEFAULT_PARTICIPANT_NAME = "You";
     private static final String SWISH_PAYMENT_URL_PREFIX = "swish://payment?data=";
+    private static final int HISTORY_LIST_ITEM_TYPE_SECTION = 0;
+    private static final int HISTORY_LIST_ITEM_TYPE_ENTRY = 1;
+    @NonNull
+    private String appliedThemeConfigurationKey = "";
 
     private final ArrayList<ReceiptHistoryStore.HistoryEntry> historyEntries = new ArrayList<>();
     private final ArrayList<ReceiptHistoryStore.HistoryEntry> visibleHistoryEntries = new ArrayList<>();
+    private final ArrayList<HistoryListItem> visibleHistoryListItems = new ArrayList<>();
     private HistoryEntriesAdapter historyEntriesAdapter;
     private View loadMoreFooterView;
     private int visibleHistoryCount = INITIAL_VISIBLE_HISTORY_COUNT;
@@ -71,6 +81,7 @@ public class HistoryActivity extends AppCompatActivity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         AppSettings.applyTheme(this);
+        appliedThemeConfigurationKey = AppSettings.getThemeConfigurationKey(this);
         super.onCreate(savedInstanceState);
         InstallResetHelper.resetInstallScopedDataIfNeeded(this);
         setContentView(R.layout.activity_history);
@@ -98,7 +109,20 @@ public class HistoryActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (recreateIfThemeConfigurationChanged()) {
+            return;
+        }
         loadHistoryEntries();
+    }
+
+    private boolean recreateIfThemeConfigurationChanged() {
+        String currentThemeConfigurationKey = AppSettings.getThemeConfigurationKey(this);
+        if (currentThemeConfigurationKey.equals(appliedThemeConfigurationKey)) {
+            return false;
+        }
+
+        recreate();
+        return true;
     }
 
     private void loadHistoryEntries() {
@@ -124,8 +148,28 @@ public class HistoryActivity extends AppCompatActivity {
         visibleHistoryEntries.clear();
         int visibleCount = Math.min(visibleHistoryCount, historyEntries.size());
         visibleHistoryEntries.addAll(historyEntries.subList(0, visibleCount));
+        rebuildVisibleHistoryListItems();
         historyEntriesAdapter.notifyDataSetChanged();
         updateLoadMoreVisibility();
+    }
+
+    private void rebuildVisibleHistoryListItems() {
+        visibleHistoryListItems.clear();
+        String previousSectionDate = null;
+        for (ReceiptHistoryStore.HistoryEntry entry : visibleHistoryEntries) {
+            String sectionDate = getHistorySectionDate(entry);
+            if (!sectionDate.equals(previousSectionDate)) {
+                visibleHistoryListItems.add(HistoryListItem.createSection(sectionDate));
+                previousSectionDate = sectionDate;
+            }
+            visibleHistoryListItems.add(HistoryListItem.createEntry(entry));
+        }
+    }
+
+    @NonNull
+    private String getHistorySectionDate(@NonNull ReceiptHistoryStore.HistoryEntry entry) {
+        String sentDate = entry.sentDate == null ? "" : entry.sentDate.trim();
+        return sentDate.isEmpty() ? getString(R.string.history_unknown_date) : sentDate;
     }
 
     private void updateLoadMoreVisibility() {
@@ -146,26 +190,92 @@ public class HistoryActivity extends AppCompatActivity {
                 dialogView.findViewById(R.id.button_close_history_receipt);
         LinearLayout participantsLayout =
                 dialogView.findViewById(R.id.layout_history_receipt_participants);
+        LinearLayout archiveSummaryTransfersLayout =
+                dialogView.findViewById(R.id.layout_history_archive_summary_transfers);
+        LinearLayout archiveReceiptSectionsLayout =
+                dialogView.findViewById(R.id.layout_history_archive_receipt_sections);
+        View toggleReceiptButtonContainer =
+                dialogView.findViewById(R.id.layout_toggle_history_receipt_button);
+        MaterialButton toggleReceiptButton =
+                dialogView.findViewById(R.id.button_toggle_history_receipt);
+        AppCompatImageView toggleReceiptIconView =
+                dialogView.findViewById(R.id.image_toggle_history_receipt_icon);
         MaterialCardView itemsCard = dialogView.findViewById(R.id.card_history_receipt_items);
+        View participantsDividerView =
+                dialogView.findViewById(R.id.view_history_receipt_participants_divider);
         LinearLayout itemsLayout = dialogView.findViewById(R.id.layout_history_receipt_items);
 
         titleView.setText(entry.receiptName);
 
         String message = entry.message == null ? "" : entry.message.trim();
-        if (message.isEmpty()) {
-            messageView.setVisibility(View.GONE);
-        } else {
-            messageView.setVisibility(View.VISIBLE);
-            messageView.setText(message);
-        }
-
-        bindHistoryParticipantButtons(participantsLayout, entry);
-
-        if (entry.items.isEmpty()) {
+        if (entry.isArchiveSummary()) {
+            ArrayList<ArchiveSummaryHistoryTransfer> transfers =
+                    buildArchiveSummaryHistoryTransfers(entry);
+            if (transfers.isEmpty()) {
+                if (message.isEmpty()) {
+                    messageView.setVisibility(View.GONE);
+                } else {
+                    messageView.setVisibility(View.VISIBLE);
+                    messageView.setText(message);
+                }
+                archiveSummaryTransfersLayout.setVisibility(View.GONE);
+            } else {
+                messageView.setVisibility(View.GONE);
+                bindArchiveSummaryHistoryTransfers(entry, archiveSummaryTransfersLayout, transfers);
+                archiveSummaryTransfersLayout.setVisibility(View.VISIBLE);
+            }
+            bindArchiveSummaryReceiptSections(archiveReceiptSectionsLayout, entry.archivedReceipts);
+            participantsLayout.setVisibility(View.GONE);
+            participantsDividerView.setVisibility(View.GONE);
+            toggleReceiptButtonContainer.setVisibility(View.GONE);
             itemsCard.setVisibility(View.GONE);
         } else {
-            bindHistoryReceiptItems(itemsLayout, entry);
-            itemsCard.setVisibility(View.VISIBLE);
+            ArrayList<ReceiptHistoryTransfer> transfers =
+                    buildReceiptHistoryTransfers(entry);
+            if (transfers.isEmpty()) {
+                archiveSummaryTransfersLayout.setVisibility(View.GONE);
+            } else {
+                bindReceiptHistoryTransfers(archiveSummaryTransfersLayout, entry, transfers);
+                archiveSummaryTransfersLayout.setVisibility(View.VISIBLE);
+            }
+            archiveReceiptSectionsLayout.setVisibility(View.GONE);
+            archiveReceiptSectionsLayout.removeAllViews();
+            if (message.isEmpty()) {
+                messageView.setVisibility(View.GONE);
+            } else {
+                messageView.setVisibility(View.VISIBLE);
+                messageView.setText(message);
+            }
+            participantsLayout.setVisibility(View.VISIBLE);
+            bindHistoryParticipantButtons(participantsLayout, entry);
+            boolean hasParticipants = !entry.participants.isEmpty();
+            boolean hasItems = !entry.items.isEmpty();
+            boolean hasReceiptContent = hasParticipants || hasItems;
+            participantsDividerView.setVisibility(
+                    hasParticipants && hasItems ? View.VISIBLE : View.GONE
+            );
+            itemsLayout.setVisibility(hasItems ? View.VISIBLE : View.GONE);
+            if (hasItems) {
+                bindHistoryReceiptItems(itemsLayout, entry);
+            }
+            if (hasReceiptContent) {
+                toggleReceiptButtonContainer.setVisibility(View.VISIBLE);
+                itemsCard.setVisibility(View.GONE);
+                updateHistoryReceiptToggleButton(toggleReceiptButton, toggleReceiptIconView, false);
+                toggleReceiptButton.setOnClickListener(view -> {
+                    boolean shouldShowReceipt = itemsCard.getVisibility() != View.VISIBLE;
+                    itemsCard.setVisibility(shouldShowReceipt ? View.VISIBLE : View.GONE);
+                    updateHistoryReceiptToggleButton(
+                            toggleReceiptButton,
+                            toggleReceiptIconView,
+                            shouldShowReceipt
+                    );
+                });
+            } else {
+                toggleReceiptButtonContainer.setVisibility(View.GONE);
+                toggleReceiptButton.setOnClickListener(null);
+                itemsCard.setVisibility(View.GONE);
+            }
         }
 
         Dialog dialog = new Dialog(this, AppSettings.getAppThemeResId(this));
@@ -180,6 +290,656 @@ public class HistoryActivity extends AppCompatActivity {
             );
             window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         }
+    }
+
+    private void updateHistoryReceiptToggleButton(
+            @NonNull MaterialButton toggleReceiptButton,
+            @NonNull AppCompatImageView toggleReceiptIconView,
+            boolean isShowingReceipt
+    ) {
+        toggleReceiptButton.setText(
+                isShowingReceipt ? R.string.hide_receipt : R.string.show_receipt
+        );
+        toggleReceiptIconView.setImageResource(
+                isShowingReceipt
+                        ? R.drawable.ic_history_hide_receipt
+                        : R.drawable.ic_history_show_receipt
+        );
+    }
+
+    private void bindReceiptHistoryTransfers(
+            @NonNull LinearLayout transfersLayout,
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull List<ReceiptHistoryTransfer> transfers
+    ) {
+        transfersLayout.removeAllViews();
+        LayoutInflater inflater = LayoutInflater.from(this);
+        int defaultEndPadding = dpToPx(56);
+        int expandedEndPadding = dpToPx(112);
+        for (ReceiptHistoryTransfer transfer : transfers) {
+            View rowView = inflater.inflate(
+                    R.layout.item_history_receipt_transfer,
+                    transfersLayout,
+                    false
+            );
+            View contentLayout = rowView.findViewById(R.id.layout_archive_summary_transfer_content);
+            TextView directionView =
+                    rowView.findViewById(R.id.text_archive_summary_transfer_direction);
+            TextView amountView =
+                    rowView.findViewById(R.id.text_archive_summary_transfer_amount);
+            AppCompatImageView statusIconView =
+                    rowView.findViewById(R.id.image_archive_summary_transfer_status);
+            MaterialButton payNowButton =
+                    rowView.findViewById(R.id.button_archive_summary_transfer_pay_now);
+            directionView.setText(formatHistoryTransferDirectionForHistoryDisplay(transfer.direction));
+            amountView.setText(transfer.amount);
+            bindHistoryTransferStatus(statusIconView, amountView, transfer.hasPaid);
+            if (contentLayout != null) {
+                contentLayout.setPadding(
+                        contentLayout.getPaddingLeft(),
+                        contentLayout.getPaddingTop(),
+                        transfer.canPayNow ? expandedEndPadding : defaultEndPadding,
+                        contentLayout.getPaddingBottom()
+                );
+            }
+            if (transfer.canPayNow) {
+                payNowButton.setVisibility(View.VISIBLE);
+                payNowButton.setOnClickListener(
+                        view -> openSwishForReceiptHistoryTransfer(entry, transfer)
+                );
+            } else {
+                payNowButton.setVisibility(View.GONE);
+                payNowButton.setOnClickListener(null);
+            }
+            attachHistoryTransferLongPress(
+                    rowView,
+                    transfer.hasPaid,
+                    () -> {
+                        toggleReceiptHistoryTransferPaidState(entry, transfer);
+                        bindReceiptHistoryTransfers(
+                                transfersLayout,
+                                entry,
+                                buildReceiptHistoryTransfers(entry)
+                        );
+                        historyEntriesAdapter.notifyDataSetChanged();
+                    }
+            );
+            transfersLayout.addView(rowView);
+        }
+    }
+
+    private void bindHistoryTransferStatus(
+            @NonNull AppCompatImageView statusIconView,
+            @NonNull TextView amountView,
+            boolean hasPaid
+    ) {
+        int statusColor = getHistoryTransferStatusColor(hasPaid);
+        bindArchiveSummaryHistoryTransferStatusIcon(statusIconView, hasPaid);
+        amountView.setTextColor(statusColor);
+    }
+
+    @NonNull
+    private ArrayList<ReceiptHistoryTransfer> buildReceiptHistoryTransfers(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry
+    ) {
+        LinkedHashMap<String, ReceiptHistoryStore.ParticipantShare> participantsByKey =
+                new LinkedHashMap<>();
+        LinkedHashMap<String, BigDecimal> balancesByKey = new LinkedHashMap<>();
+        for (ReceiptHistoryStore.ParticipantShare participant : entry.participants) {
+            participantsByKey.put(participant.key, participant);
+            balancesByKey.put(participant.key, BigDecimal.ZERO);
+        }
+
+        for (ReceiptHistoryStore.HistoryItem item : entry.items) {
+            ReceiptHistoryStore.ParticipantShare payer = findReceiptHistoryPayer(entry, item);
+            if (payer == null) {
+                continue;
+            }
+
+            participantsByKey.putIfAbsent(payer.key, payer);
+            balancesByKey.putIfAbsent(payer.key, BigDecimal.ZERO);
+
+            int selectedParticipantCount = countSelectedHistoryParticipants(item, entry.participants);
+            if (selectedParticipantCount == 0) {
+                continue;
+            }
+
+            BigDecimal itemAmount = parseCurrencyAmount(item.price);
+            BigDecimal sharedAmount = itemAmount.divide(
+                    BigDecimal.valueOf(selectedParticipantCount),
+                    2,
+                    RoundingMode.HALF_UP
+            );
+            for (ReceiptHistoryStore.ParticipantShare participant : entry.participants) {
+                if (!item.isParticipantSelected(participant.key)
+                        || participant.key.equals(payer.key)) {
+                    continue;
+                }
+
+                balancesByKey.put(
+                        payer.key,
+                        balancesByKey.get(payer.key).add(sharedAmount)
+                );
+                balancesByKey.put(
+                        participant.key,
+                        balancesByKey.get(participant.key).subtract(sharedAmount)
+                );
+            }
+        }
+
+        ArrayList<HistoryTransferBalance> creditors = new ArrayList<>();
+        ArrayList<HistoryTransferBalance> debtors = new ArrayList<>();
+        for (String participantKey : balancesByKey.keySet()) {
+            BigDecimal balance = balancesByKey.get(participantKey).setScale(2, RoundingMode.HALF_UP);
+            if (balance.compareTo(BigDecimal.ZERO) > 0) {
+                creditors.add(new HistoryTransferBalance(
+                        participantsByKey.get(participantKey),
+                        balance
+                ));
+            } else if (balance.compareTo(BigDecimal.ZERO) < 0) {
+                debtors.add(new HistoryTransferBalance(
+                        participantsByKey.get(participantKey),
+                        balance.abs()
+                ));
+            }
+        }
+
+        ArrayList<ReceiptHistoryTransfer> transfers = new ArrayList<>();
+        while (!creditors.isEmpty() && !debtors.isEmpty()) {
+            creditors.sort((first, second) -> second.amount.compareTo(first.amount));
+            debtors.sort((first, second) -> second.amount.compareTo(first.amount));
+
+            HistoryTransferBalance creditor = creditors.get(0);
+            HistoryTransferBalance debtor = debtors.get(0);
+            BigDecimal transferAmount = creditor.amount.min(debtor.amount)
+                    .setScale(2, RoundingMode.HALF_UP);
+
+            transfers.add(new ReceiptHistoryTransfer(
+                    getString(
+                            R.string.history_receipt_transfer_direction_arrow,
+                            getHistoryParticipantDisplayName(debtor.participant),
+                            getHistoryParticipantDisplayName(creditor.participant)
+                    ),
+                    getString(
+                            R.string.archive_summary_transfer_amount,
+                            formatHistoryTransferAmount(transferAmount)
+                    ),
+                    debtor.participant.hasPaid,
+                    isDefaultParticipant(debtor.participant) && !debtor.participant.hasPaid,
+                    debtor.participant.key,
+                    creditor.participant.phoneNumber,
+                    transferAmount
+            ));
+
+            creditor.amount = creditor.amount.subtract(transferAmount);
+            debtor.amount = debtor.amount.subtract(transferAmount);
+
+            if (creditor.amount.compareTo(BigDecimal.ZERO) == 0) {
+                creditors.remove(0);
+            }
+            if (debtor.amount.compareTo(BigDecimal.ZERO) == 0) {
+                debtors.remove(0);
+            }
+        }
+
+        return transfers;
+    }
+
+    private void openSwishForReceiptHistoryTransfer(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull ReceiptHistoryTransfer transfer
+    ) {
+        String normalizedPhoneNumber =
+                normalizePhoneNumberForSwish(transfer.recipientPhoneNumber);
+        if (normalizedPhoneNumber.isEmpty()) {
+            Toast.makeText(
+                    this,
+                    R.string.pay_now_owner_phone_unavailable,
+                    Toast.LENGTH_SHORT
+            ).show();
+            return;
+        }
+
+        if (transfer.amountValue.compareTo(BigDecimal.ZERO) <= 0) {
+            Toast.makeText(this, R.string.pay_now_nothing_to_pay, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            Intent swishIntent = new Intent(
+                    Intent.ACTION_VIEW,
+                    buildSwishPaymentUri(
+                            normalizedPhoneNumber,
+                            transfer.amountValue,
+                            entry.receiptName
+                    )
+            );
+            startActivity(swishIntent);
+        } catch (ActivityNotFoundException | JSONException exception) {
+            Toast.makeText(this, R.string.pay_now_open_swish_failed, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void bindArchiveSummaryHistoryTransfers(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull LinearLayout transfersLayout,
+            @NonNull List<ArchiveSummaryHistoryTransfer> transfers
+    ) {
+        transfersLayout.removeAllViews();
+        LayoutInflater inflater = LayoutInflater.from(this);
+        int defaultEndPadding = dpToPx(56);
+        int expandedEndPadding = dpToPx(112);
+        for (ArchiveSummaryHistoryTransfer transfer : transfers) {
+            View rowView = inflater.inflate(
+                    R.layout.item_history_receipt_transfer,
+                    transfersLayout,
+                    false
+            );
+            View contentLayout = rowView.findViewById(R.id.layout_archive_summary_transfer_content);
+            TextView directionView =
+                    rowView.findViewById(R.id.text_archive_summary_transfer_direction);
+            TextView amountView =
+                    rowView.findViewById(R.id.text_archive_summary_transfer_amount);
+            AppCompatImageView statusIconView =
+                    rowView.findViewById(R.id.image_archive_summary_transfer_status);
+            MaterialButton payNowButton =
+                    rowView.findViewById(R.id.button_archive_summary_transfer_pay_now);
+            directionView.setText(formatHistoryTransferDirectionForHistoryDisplay(transfer.direction));
+            amountView.setText(transfer.amount);
+            bindHistoryTransferStatus(statusIconView, amountView, transfer.hasPaid);
+            if (contentLayout != null) {
+                contentLayout.setPadding(
+                        contentLayout.getPaddingLeft(),
+                        contentLayout.getPaddingTop(),
+                        transfer.canPayNow ? expandedEndPadding : defaultEndPadding,
+                        contentLayout.getPaddingBottom()
+                );
+            }
+            if (transfer.canPayNow) {
+                payNowButton.setVisibility(View.VISIBLE);
+                payNowButton.setOnClickListener(
+                        view -> openSwishForArchiveHistoryTransfer(entry, transfer)
+                );
+            } else {
+                payNowButton.setVisibility(View.GONE);
+                payNowButton.setOnClickListener(null);
+            }
+            attachHistoryTransferLongPress(
+                    rowView,
+                    transfer.hasPaid,
+                    () -> {
+                        toggleArchiveHistoryTransferPaidState(entry, transfer);
+                        bindArchiveSummaryHistoryTransfers(
+                                entry,
+                                transfersLayout,
+                                buildArchiveSummaryHistoryTransfers(entry)
+                        );
+                        historyEntriesAdapter.notifyDataSetChanged();
+                    }
+            );
+            transfersLayout.addView(rowView);
+        }
+    }
+
+    private void bindArchiveSummaryReceiptSections(
+            @NonNull LinearLayout sectionsLayout,
+            @NonNull List<ReceiptHistoryStore.HistoryEntry> archivedReceipts
+    ) {
+        sectionsLayout.removeAllViews();
+        if (archivedReceipts.isEmpty()) {
+            sectionsLayout.setVisibility(View.GONE);
+            return;
+        }
+
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (ReceiptHistoryStore.HistoryEntry archivedReceipt : archivedReceipts) {
+            View sectionView = inflater.inflate(
+                    R.layout.item_history_archive_receipt_section,
+                    sectionsLayout,
+                    false
+            );
+            MaterialButton toggleButton = sectionView.findViewById(
+                    R.id.button_history_archive_receipt_section_toggle
+            );
+            AppCompatImageView toggleIconView = sectionView.findViewById(
+                    R.id.image_history_archive_receipt_section_toggle_icon
+            );
+            MaterialCardView receiptCard = sectionView.findViewById(
+                    R.id.card_history_archive_receipt_section
+            );
+            LinearLayout participantsLayout = sectionView.findViewById(
+                    R.id.layout_history_archive_receipt_section_participants
+            );
+            View dividerView = sectionView.findViewById(
+                    R.id.view_history_archive_receipt_section_divider
+            );
+            LinearLayout itemsLayout = sectionView.findViewById(
+                    R.id.layout_history_archive_receipt_section_items
+            );
+
+            toggleButton.setText(archivedReceipt.receiptName);
+
+            boolean hasParticipants = !archivedReceipt.participants.isEmpty();
+            boolean hasItems = !archivedReceipt.items.isEmpty();
+            boolean hasReceiptContent = hasParticipants || hasItems;
+
+            participantsLayout.setVisibility(hasParticipants ? View.VISIBLE : View.GONE);
+            if (hasParticipants) {
+                bindHistoryParticipantButtons(participantsLayout, archivedReceipt);
+            } else {
+                participantsLayout.removeAllViews();
+            }
+
+            dividerView.setVisibility(hasParticipants && hasItems ? View.VISIBLE : View.GONE);
+
+            itemsLayout.setVisibility(hasItems ? View.VISIBLE : View.GONE);
+            if (hasItems) {
+                bindHistoryReceiptItems(itemsLayout, archivedReceipt);
+            } else {
+                itemsLayout.removeAllViews();
+            }
+
+            receiptCard.setVisibility(View.GONE);
+            toggleButton.setEnabled(hasReceiptContent);
+            updateArchiveHistoryReceiptSectionToggleIcon(toggleIconView, false);
+            toggleButton.setOnClickListener(view -> {
+                if (!hasReceiptContent) {
+                    return;
+                }
+                boolean shouldShowReceipt = receiptCard.getVisibility() != View.VISIBLE;
+                receiptCard.setVisibility(shouldShowReceipt ? View.VISIBLE : View.GONE);
+                updateArchiveHistoryReceiptSectionToggleIcon(
+                        toggleIconView,
+                        shouldShowReceipt
+                );
+            });
+
+            sectionsLayout.addView(sectionView);
+        }
+
+        sectionsLayout.setVisibility(View.VISIBLE);
+    }
+
+    private void updateArchiveHistoryReceiptSectionToggleIcon(
+            @NonNull AppCompatImageView toggleIconView,
+            boolean isShowingReceipt
+    ) {
+        toggleIconView.setImageResource(
+                isShowingReceipt
+                        ? R.drawable.ic_history_hide_receipt
+                        : R.drawable.ic_history_show_receipt
+        );
+    }
+
+    @NonNull
+    private ArrayList<ArchiveSummaryHistoryTransfer> buildArchiveSummaryHistoryTransfers(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry
+    ) {
+        if (!entry.items.isEmpty()) {
+            ArrayList<ArchiveSummaryHistoryTransfer> transfers = new ArrayList<>();
+            for (ReceiptHistoryStore.HistoryItem item : entry.items) {
+                String direction = normalizeWhitespace(item.name);
+                if (direction.isEmpty()) {
+                    continue;
+                }
+                String amount = getString(R.string.archive_summary_transfer_amount, item.price);
+                ReceiptHistoryStore.ParticipantShare debtorParticipant =
+                        item.selectedParticipantKeys.isEmpty()
+                                ? null
+                                : findHistoryParticipantByKey(
+                                        entry.participants,
+                                        item.selectedParticipantKeys.get(0)
+                                );
+                ReceiptHistoryStore.ParticipantShare creditorParticipant =
+                        findHistoryParticipantByKey(entry.participants, item.payerParticipantKey);
+                boolean canPayNow = debtorParticipant != null
+                        && creditorParticipant != null
+                        && isDefaultParticipant(debtorParticipant)
+                        && !item.hasPaid
+                        && !normalizeWhitespace(creditorParticipant.phoneNumber).isEmpty();
+                String recipientPhoneNumber =
+                        creditorParticipant == null ? "" : creditorParticipant.phoneNumber;
+                transfers.add(new ArchiveSummaryHistoryTransfer(
+                        direction,
+                        amount,
+                        item.hasPaid,
+                        canPayNow,
+                        recipientPhoneNumber,
+                        parseCurrencyAmount(item.price),
+                        item
+                ));
+            }
+            return transfers;
+        }
+
+        return parseArchiveSummaryHistoryTransfers(entry.message);
+    }
+
+    private void bindArchiveSummaryHistoryTransferStatusIcon(
+            @NonNull AppCompatImageView statusIconView,
+            boolean hasPaid
+    ) {
+        statusIconView.setVisibility(View.VISIBLE);
+        if (hasPaid) {
+            statusIconView.setImageResource(R.drawable.ic_history_transfer_paid);
+            statusIconView.setImageTintList(
+                    ColorStateList.valueOf(getHistoryTransferStatusColor(true))
+            );
+        } else {
+            statusIconView.setImageResource(R.drawable.ic_history_transfer_unpaid);
+            statusIconView.setImageTintList(
+                    ColorStateList.valueOf(getHistoryTransferStatusColor(false))
+            );
+        }
+    }
+
+    @NonNull
+    private String formatHistoryTransferDirectionForDisplay(@Nullable String direction) {
+        String normalizedDirection = normalizeWhitespace(direction);
+        if (normalizedDirection.isEmpty()) {
+            return "";
+        }
+        return normalizedDirection.replace(" pays ", " → ");
+    }
+
+    private int getHistoryTransferStatusColor(boolean hasPaid) {
+        return ContextCompat.getColor(
+                this,
+                hasPaid ? R.color.brand_green : R.color.brand_red
+        );
+    }
+
+    @NonNull
+    private String formatHistoryTransferDirectionForHistoryDisplay(@Nullable String direction) {
+        String normalizedDirection = normalizeWhitespace(direction);
+        if (normalizedDirection.isEmpty()) {
+            return "";
+        }
+        return normalizedDirection.replace(" pays ", " \u2192 ");
+    }
+
+    @NonNull
+    private ArrayList<ArchiveSummaryHistoryTransfer> parseArchiveSummaryHistoryTransfers(
+            @Nullable String message
+    ) {
+        ArrayList<ArchiveSummaryHistoryTransfer> transfers = new ArrayList<>();
+        String normalizedMessage = normalizeWhitespace(message);
+        if (normalizedMessage.isEmpty()) {
+            return transfers;
+        }
+
+        String[] lines = message.split("\\r?\\n");
+        for (String line : lines) {
+            String trimmedLine = line.trim();
+            if (trimmedLine.isEmpty()) {
+                continue;
+            }
+
+            int separatorIndex = trimmedLine.lastIndexOf(" - ");
+            if (separatorIndex <= 0 || separatorIndex >= trimmedLine.length() - 3) {
+                continue;
+            }
+
+            String direction = trimmedLine.substring(0, separatorIndex).trim();
+            String amount = trimmedLine.substring(separatorIndex + 3).trim();
+            if (direction.isEmpty() || amount.isEmpty()) {
+                continue;
+            }
+
+            transfers.add(new ArchiveSummaryHistoryTransfer(
+                    direction,
+                    amount,
+                    false,
+                    false,
+                    "",
+                    parseCurrencyAmount(amount.replace("kr", "").trim()),
+                    null
+            ));
+        }
+        return transfers;
+    }
+
+    private void openSwishForArchiveHistoryTransfer(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull ArchiveSummaryHistoryTransfer transfer
+    ) {
+        String normalizedPhoneNumber =
+                normalizePhoneNumberForSwish(transfer.recipientPhoneNumber);
+        if (normalizedPhoneNumber.isEmpty()) {
+            Toast.makeText(
+                    this,
+                    R.string.pay_now_owner_phone_unavailable,
+                    Toast.LENGTH_SHORT
+            ).show();
+            return;
+        }
+
+        if (transfer.amountValue.compareTo(BigDecimal.ZERO) <= 0) {
+            Toast.makeText(this, R.string.pay_now_nothing_to_pay, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            Intent swishIntent = new Intent(
+                    Intent.ACTION_VIEW,
+                    buildSwishPaymentUri(
+                            normalizedPhoneNumber,
+                            transfer.amountValue,
+                            entry.receiptName
+                    )
+            );
+            startActivity(swishIntent);
+        } catch (ActivityNotFoundException | JSONException exception) {
+            Toast.makeText(this, R.string.pay_now_open_swish_failed, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void attachHistoryTransferLongPress(
+            @NonNull View rowView,
+            boolean hasPaid,
+            @NonNull Runnable toggleAction
+    ) {
+        rowView.setOnTouchListener(new View.OnTouchListener() {
+            private final int touchSlop = ViewConfiguration
+                    .get(HistoryActivity.this)
+                    .getScaledTouchSlop();
+            private float downX;
+            private float downY;
+            private float downRawX;
+            private float downRawY;
+            private boolean longPressTriggered;
+            private final Runnable longPressRunnable = () -> {
+                longPressTriggered = true;
+                vibrateForHistoryLongPress();
+                showHistoryTransferActionsMenu(
+                        rowView,
+                        downRawX,
+                        downRawY,
+                        hasPaid,
+                        toggleAction
+                );
+            };
+
+            @Override
+            public boolean onTouch(View view, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downX = event.getX();
+                        downY = event.getY();
+                        downRawX = event.getRawX();
+                        downRawY = event.getRawY();
+                        longPressTriggered = false;
+                        view.postDelayed(
+                                longPressRunnable,
+                                HISTORY_ENTRY_LONG_PRESS_DURATION_MS
+                        );
+                        return false;
+                    case MotionEvent.ACTION_MOVE:
+                        if (Math.abs(event.getX() - downX) > touchSlop
+                                || Math.abs(event.getY() - downY) > touchSlop) {
+                            view.removeCallbacks(longPressRunnable);
+                        }
+                        return false;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        view.removeCallbacks(longPressRunnable);
+                        return longPressTriggered;
+                    default:
+                        return false;
+                }
+            }
+        });
+    }
+
+    private void showHistoryTransferActionsMenu(
+            @NonNull View anchorView,
+            float rawTouchX,
+            float rawTouchY,
+            boolean hasPaid,
+            @NonNull Runnable toggleAction
+    ) {
+        AnchoredDropdownMenuHelper.showSingleActionMenu(
+                anchorView,
+                rawTouchX,
+                rawTouchY,
+                hasPaid ? R.string.mark_as_unpayed : R.string.mark_as_payed,
+                hasPaid ? R.drawable.ic_history_transfer_unpaid : R.drawable.ic_history_transfer_paid,
+                toggleAction
+        );
+    }
+
+    private void toggleReceiptHistoryTransferPaidState(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull ReceiptHistoryTransfer transfer
+    ) {
+        if (normalizeWhitespace(transfer.debtorParticipantKey).isEmpty()) {
+            return;
+        }
+        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.markParticipantPaid(
+                this,
+                entry,
+                transfer.debtorParticipantKey,
+                !transfer.hasPaid
+        );
+        entry.participants.clear();
+        entry.participants.addAll(updatedEntry.participants);
+    }
+
+    private void toggleArchiveHistoryTransferPaidState(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull ArchiveSummaryHistoryTransfer transfer
+    ) {
+        if (transfer.sourceItem == null) {
+            return;
+        }
+        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.markHistoryItemPaid(
+                this,
+                entry,
+                transfer.sourceItem,
+                !transfer.hasPaid
+        );
+        entry.items.clear();
+        entry.items.addAll(updatedEntry.items);
     }
 
     private void showDeleteHistoryDialog(
@@ -260,40 +1020,32 @@ public class HistoryActivity extends AppCompatActivity {
         for (int index = 0; index < participants.size(); index++) {
             ReceiptHistoryStore.ParticipantShare participant = participants.get(index);
             View rowView = LayoutInflater.from(this).inflate(
-                    R.layout.item_receipt_summary_participant,
+                    R.layout.item_receipt_view_participant_button,
                     participantsLayout,
                     false
             );
             MaterialButton badgeButton = rowView.findViewById(R.id.button_summary_participant_badge);
-            AppCompatImageView paymentStatusIconView =
-                    rowView.findViewById(R.id.image_summary_participant_payment_status);
             AppCompatImageView ownerIconView =
                     rowView.findViewById(R.id.image_summary_participant_owner);
             TextView nameView = rowView.findViewById(R.id.text_summary_participant_name);
             TextView amountView = rowView.findViewById(R.id.text_summary_participant_amount);
-            MaterialButton payNowButton =
-                    rowView.findViewById(R.id.button_summary_participant_pay_now);
-            View dividerView = rowView.findViewById(R.id.view_summary_participant_divider);
             boolean isOwner = isCrownedParticipant(participant);
 
             configureHistoryParticipantBadgeButton(badgeButton, participant, true);
-            bindHistoryParticipantPaymentStatusIcon(paymentStatusIconView, participant);
             ownerIconView.setVisibility(
                     isOwner ? View.VISIBLE : View.GONE
             );
             nameView.setText(participant.name);
-            amountView.setText(
-                    buildHistoryParticipantTotalDisplayText(participant.amount, entry.totalAmount)
+            amountView.setText(buildHistoryParticipantAmountDisplayText(participant.amount));
+
+            LinearLayout.LayoutParams rowLayoutParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
             );
-            payNowButton.setVisibility(isOwner ? View.VISIBLE : View.GONE);
-            payNowButton.setEnabled(!isDefaultParticipant(participant));
-            payNowButton.setOnClickListener(
-                    view -> {
-                        openSwishForHistoryEntry(entry, participant);
-                        bindHistoryParticipantButtons(participantsLayout, entry);
-                    }
-            );
-            dividerView.setVisibility(index == participants.size() - 1 ? View.GONE : View.VISIBLE);
+            if (index < participants.size() - 1) {
+                rowLayoutParams.bottomMargin = dpToPx(8);
+            }
+            rowView.setLayoutParams(rowLayoutParams);
 
             View.OnClickListener openDetailsListener =
                     view -> showHistoryParticipantDetailsDialog(participant, entry.totalAmount);
@@ -349,13 +1101,16 @@ public class HistoryActivity extends AppCompatActivity {
             itemView.setClickable(false);
             itemView.setFocusable(false);
 
+            AppCompatImageView payerSwatchView =
+                    itemView.findViewById(R.id.image_receipt_item_payer_swatch);
             TextView itemNameView = itemView.findViewById(R.id.text_receipt_item_name);
             TextView itemPriceView = itemView.findViewById(R.id.text_receipt_item_price);
             LinearLayout participantSelectionLayout =
                     itemView.findViewById(R.id.layout_receipt_item_participants);
 
+            bindHistoryItemPayerSwatch(payerSwatchView, item, participants);
             itemNameView.setText(item.name);
-            itemPriceView.setText(item.price);
+            itemPriceView.setText(getString(R.string.archive_summary_transfer_amount, item.price));
             bindHistoryItemParticipantButtons(
                     participantSelectionLayout,
                     item,
@@ -367,6 +1122,78 @@ public class HistoryActivity extends AppCompatActivity {
                 itemsLayout.addView(createHistoryItemDivider());
             }
         }
+    }
+
+    private void bindHistoryItemPayerSwatch(
+            @NonNull AppCompatImageView payerSwatchView,
+            @NonNull ReceiptHistoryStore.HistoryItem item,
+            @NonNull List<ReceiptHistoryStore.ParticipantShare> participants
+    ) {
+        String payerParticipantKey =
+                normalizeHistoryItemPayerKey(item.payerParticipantKey, participants);
+        if (payerParticipantKey.isEmpty()) {
+            payerSwatchView.setVisibility(View.GONE);
+            payerSwatchView.setBackground(null);
+            return;
+        }
+
+        ReceiptHistoryStore.ParticipantShare payerParticipant =
+                findHistoryParticipantByKey(participants, payerParticipantKey);
+        if (payerParticipant == null) {
+            payerSwatchView.setVisibility(View.GONE);
+            payerSwatchView.setBackground(null);
+            return;
+        }
+
+        payerSwatchView.setVisibility(View.VISIBLE);
+        payerSwatchView.setBackground(
+                createHistoryItemPayerSwatchDrawable(payerParticipant.color, null)
+        );
+    }
+
+    @NonNull
+    private GradientDrawable createHistoryItemPayerSwatchDrawable(
+            int fillColor,
+            @Nullable Integer strokeColor
+    ) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setShape(GradientDrawable.OVAL);
+        drawable.setColor(fillColor);
+        if (strokeColor != null) {
+            drawable.setStroke(dpToPx(1), strokeColor);
+        }
+        return drawable;
+    }
+
+    @NonNull
+    private String normalizeHistoryItemPayerKey(
+            @Nullable String payerParticipantKey,
+            @NonNull List<ReceiptHistoryStore.ParticipantShare> participants
+    ) {
+        String normalizedPayerParticipantKey = normalizeWhitespace(payerParticipantKey);
+        if (normalizedPayerParticipantKey.isEmpty()) {
+            return "";
+        }
+        return findHistoryParticipantByKey(participants, normalizedPayerParticipantKey) == null
+                ? ""
+                : normalizedPayerParticipantKey;
+    }
+
+    @Nullable
+    private ReceiptHistoryStore.ParticipantShare findHistoryParticipantByKey(
+            @NonNull List<ReceiptHistoryStore.ParticipantShare> participants,
+            @Nullable String participantKey
+    ) {
+        String normalizedParticipantKey = normalizeWhitespace(participantKey);
+        if (normalizedParticipantKey.isEmpty()) {
+            return null;
+        }
+        for (ReceiptHistoryStore.ParticipantShare participant : participants) {
+            if (participant.key.equals(normalizedParticipantKey)) {
+                return participant;
+            }
+        }
+        return null;
     }
 
     @NonNull
@@ -444,14 +1271,20 @@ public class HistoryActivity extends AppCompatActivity {
             selectionButton.setCheckable(false);
             selectionButton.setContentDescription(participant.name);
 
-            int buttonColor = item.isParticipantSelected(participant.key)
+            boolean isChecked = item.isParticipantSelected(participant.key);
+            int buttonColor = isChecked
                     ? participant.color
                     : UNCHECKED_PARTICIPANT_COLOR;
             selectionButton.setStrokeColor(ColorStateList.valueOf(buttonColor));
-            selectionButton.setTextColor(buttonColor);
-            selectionButton.setOnClickListener(
-                    view -> showHistoryParticipantDetailsDialog(participant, receiptTotalAmount)
+            selectionButton.setBackgroundTintList(ColorStateList.valueOf(
+                    isChecked ? participant.color : Color.TRANSPARENT
+            ));
+            selectionButton.setTextColor(
+                    isChecked ? getParticipantTextColor(participant.color) : buttonColor
             );
+            selectionButton.setFocusable(false);
+            selectionButton.setClickable(false);
+            selectionButton.setOnClickListener(null);
 
             if (currentRow != null) {
                 currentRow.addView(selectionButton);
@@ -506,6 +1339,12 @@ public class HistoryActivity extends AppCompatActivity {
     }
 
     @NonNull
+    private String buildHistoryParticipantAmountDisplayText(@Nullable String participantAmount) {
+        String amountText = normalizeWhitespace(participantAmount);
+        return amountText.isEmpty() ? "0,00kr" : amountText + "kr";
+    }
+
+    @NonNull
     private CharSequence buildHistoryParticipantTotalDisplayText(
             @Nullable String participantAmount,
             @Nullable String receiptTotalAmount
@@ -551,6 +1390,69 @@ public class HistoryActivity extends AppCompatActivity {
                 .multiply(BigDecimal.valueOf(100))
                 .divide(receiptTotal, 0, RoundingMode.HALF_UP)
                 .toPlainString();
+    }
+
+    private int countSelectedHistoryParticipants(
+            @NonNull ReceiptHistoryStore.HistoryItem item,
+            @NonNull List<ReceiptHistoryStore.ParticipantShare> participants
+    ) {
+        int count = 0;
+        for (ReceiptHistoryStore.ParticipantShare participant : participants) {
+            if (item.isParticipantSelected(participant.key)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    @Nullable
+    private ReceiptHistoryStore.ParticipantShare findReceiptHistoryPayer(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull ReceiptHistoryStore.HistoryItem item
+    ) {
+        String explicitPayerKey =
+                normalizeHistoryItemPayerKey(item.payerParticipantKey, entry.participants);
+        if (!explicitPayerKey.isEmpty()) {
+            ReceiptHistoryStore.ParticipantShare explicitPayer =
+                    findHistoryParticipantByKey(entry.participants, explicitPayerKey);
+            if (explicitPayer != null) {
+                return explicitPayer;
+            }
+        }
+        return findHistoryReceiptOwnerParticipant(entry);
+    }
+
+    @Nullable
+    private ReceiptHistoryStore.ParticipantShare findHistoryReceiptOwnerParticipant(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry
+    ) {
+        for (ReceiptHistoryStore.ParticipantShare participant : entry.participants) {
+            if (isCrownedParticipant(participant)) {
+                return participant;
+            }
+        }
+        for (ReceiptHistoryStore.ParticipantShare participant : entry.participants) {
+            if (isDefaultParticipant(participant)) {
+                return participant;
+            }
+        }
+        return entry.participants.isEmpty() ? null : entry.participants.get(0);
+    }
+
+    @NonNull
+    private String getHistoryParticipantDisplayName(
+            @NonNull ReceiptHistoryStore.ParticipantShare participant
+    ) {
+        return isDefaultParticipant(participant)
+                ? DEFAULT_PARTICIPANT_NAME
+                : normalizeWhitespace(participant.name);
+    }
+
+    @NonNull
+    private String formatHistoryTransferAmount(@NonNull BigDecimal amount) {
+        return amount.setScale(2, RoundingMode.HALF_UP)
+                .toPlainString()
+                .replace('.', ',');
     }
 
     @NonNull
@@ -601,6 +1503,83 @@ public class HistoryActivity extends AppCompatActivity {
                     resolveThemeColor(com.google.android.material.R.attr.colorError, Color.RED)
             ));
         }
+    }
+
+    private void bindHistoryReceiptStatusIcon(
+            @NonNull AppCompatImageView statusIconView,
+            @NonNull ReceiptHistoryStore.HistoryEntry entry
+    ) {
+        statusIconView.setVisibility(View.VISIBLE);
+        int paymentStatus = entry.isArchiveSummary()
+                ? getArchiveHistoryPaymentStatus(entry)
+                : getHistoryReceiptPaymentStatus(entry);
+        if (paymentStatus == RECEIPT_PAYMENT_STATUS_ALL) {
+            statusIconView.setImageResource(R.drawable.ic_history_receipt_paid);
+            statusIconView.setImageTintList(ColorStateList.valueOf(
+                    ContextCompat.getColor(this, R.color.brand_green)
+            ));
+            return;
+        }
+        if (paymentStatus == RECEIPT_PAYMENT_STATUS_PARTIAL) {
+            statusIconView.setImageResource(R.drawable.ic_history_receipt_partial);
+            statusIconView.setImageTintList(ColorStateList.valueOf(
+                    ContextCompat.getColor(this, R.color.brand_orange)
+            ));
+            return;
+        }
+        statusIconView.setImageResource(R.drawable.ic_history_receipt_unpaid);
+        statusIconView.setImageTintList(ColorStateList.valueOf(
+                ContextCompat.getColor(this, R.color.brand_red)
+        ));
+    }
+
+    private int getArchiveHistoryPaymentStatus(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry
+    ) {
+        ArrayList<ArchiveSummaryHistoryTransfer> transfers =
+                buildArchiveSummaryHistoryTransfers(entry);
+        if (transfers.isEmpty()) {
+            return RECEIPT_PAYMENT_STATUS_ALL;
+        }
+
+        int paidTransferCount = 0;
+        for (ArchiveSummaryHistoryTransfer transfer : transfers) {
+            if (transfer.hasPaid) {
+                paidTransferCount++;
+            }
+        }
+
+        if (paidTransferCount == transfers.size()) {
+            return RECEIPT_PAYMENT_STATUS_ALL;
+        }
+        if (paidTransferCount > 0) {
+            return RECEIPT_PAYMENT_STATUS_PARTIAL;
+        }
+        return RECEIPT_PAYMENT_STATUS_NONE;
+    }
+
+    private int getHistoryReceiptPaymentStatus(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry
+    ) {
+        ArrayList<ReceiptHistoryTransfer> transfers = buildReceiptHistoryTransfers(entry);
+        if (transfers.isEmpty()) {
+            return RECEIPT_PAYMENT_STATUS_ALL;
+        }
+
+        int paidTransferCount = 0;
+        for (ReceiptHistoryTransfer transfer : transfers) {
+            if (transfer.hasPaid) {
+                paidTransferCount++;
+            }
+        }
+
+        if (paidTransferCount == transfers.size()) {
+            return RECEIPT_PAYMENT_STATUS_ALL;
+        }
+        if (paidTransferCount > 0) {
+            return RECEIPT_PAYMENT_STATUS_PARTIAL;
+        }
+        return RECEIPT_PAYMENT_STATUS_NONE;
     }
 
     @NonNull
@@ -861,29 +1840,86 @@ public class HistoryActivity extends AppCompatActivity {
         }
     }
 
-    private final class HistoryEntriesAdapter extends ArrayAdapter<ReceiptHistoryStore.HistoryEntry> {
+    private final class HistoryEntriesAdapter extends ArrayAdapter<HistoryListItem> {
         private HistoryEntriesAdapter() {
-            super(HistoryActivity.this, R.layout.item_history_receipt, visibleHistoryEntries);
+            super(HistoryActivity.this, R.layout.item_history_receipt, visibleHistoryListItems);
+        }
+
+        @Override
+        public int getViewTypeCount() {
+            return 2;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            HistoryListItem item = getItem(position);
+            if (item == null) {
+                return HISTORY_LIST_ITEM_TYPE_ENTRY;
+            }
+            return item.viewType;
+        }
+
+        @Override
+        public boolean areAllItemsEnabled() {
+            return false;
+        }
+
+        @Override
+        public boolean isEnabled(int position) {
+            HistoryListItem item = getItem(position);
+            return item != null && item.viewType == HISTORY_LIST_ITEM_TYPE_ENTRY;
         }
 
         @NonNull
         @Override
         public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
+            HistoryListItem item = getItem(position);
+            if (item == null) {
+                return new View(getContext());
+            }
+
+            if (item.viewType == HISTORY_LIST_ITEM_TYPE_SECTION) {
+                View sectionView = convertView;
+                if (sectionView == null) {
+                    sectionView = LayoutInflater.from(getContext())
+                            .inflate(R.layout.item_history_date_section, parent, false);
+                }
+
+                TextView sectionDateView =
+                        sectionView.findViewById(R.id.text_history_section_date);
+                sectionDateView.setText(item.sectionDate);
+                sectionView.setOnClickListener(null);
+                sectionView.setOnTouchListener(null);
+                sectionView.setClickable(false);
+                sectionView.setFocusable(false);
+                return sectionView;
+            }
+
             View itemView = convertView;
             if (itemView == null) {
                 itemView = LayoutInflater.from(getContext())
                         .inflate(R.layout.item_history_receipt, parent, false);
             }
 
-            ReceiptHistoryStore.HistoryEntry entry = getItem(position);
+            ReceiptHistoryStore.HistoryEntry entry = item.entry;
             TextView receiptNameView = itemView.findViewById(R.id.text_history_receipt_name);
             TextView totalAmountView = itemView.findViewById(R.id.text_history_receipt_total);
-            TextView sentDateView = itemView.findViewById(R.id.text_history_receipt_date);
+            AppCompatImageView typeIconView =
+                    itemView.findViewById(R.id.image_history_receipt_type);
+            AppCompatImageView statusIconView =
+                    itemView.findViewById(R.id.image_history_receipt_status);
 
             if (entry != null) {
                 receiptNameView.setText(entry.receiptName);
-                totalAmountView.setText(entry.totalAmount);
-                sentDateView.setText(entry.sentDate);
+                totalAmountView.setText(
+                        getString(R.string.archive_summary_transfer_amount, entry.totalAmount)
+                );
+                if (entry.isArchiveSummary()) {
+                    typeIconView.setImageResource(R.drawable.ic_archive_entry_folder);
+                } else {
+                    typeIconView.setImageResource(R.drawable.ic_history_receipt_bill);
+                }
+                bindHistoryReceiptStatusIcon(statusIconView, entry);
             }
 
             if (entry != null) {
@@ -946,6 +1982,115 @@ public class HistoryActivity extends AppCompatActivity {
             }
 
             return itemView;
+        }
+    }
+
+    private static final class HistoryListItem {
+        final int viewType;
+        @Nullable
+        final String sectionDate;
+        @Nullable
+        final ReceiptHistoryStore.HistoryEntry entry;
+
+        private HistoryListItem(
+                int viewType,
+                @Nullable String sectionDate,
+                @Nullable ReceiptHistoryStore.HistoryEntry entry
+        ) {
+            this.viewType = viewType;
+            this.sectionDate = sectionDate;
+            this.entry = entry;
+        }
+
+        @NonNull
+        private static HistoryListItem createSection(@NonNull String sectionDate) {
+            return new HistoryListItem(HISTORY_LIST_ITEM_TYPE_SECTION, sectionDate, null);
+        }
+
+        @NonNull
+        private static HistoryListItem createEntry(@NonNull ReceiptHistoryStore.HistoryEntry entry) {
+            return new HistoryListItem(HISTORY_LIST_ITEM_TYPE_ENTRY, null, entry);
+        }
+    }
+
+    private static final class ArchiveSummaryHistoryTransfer {
+        @NonNull
+        private final String direction;
+        @NonNull
+        private final String amount;
+        private final boolean hasPaid;
+        private final boolean canPayNow;
+        @NonNull
+        private final String recipientPhoneNumber;
+        @NonNull
+        private final BigDecimal amountValue;
+        @Nullable
+        private final ReceiptHistoryStore.HistoryItem sourceItem;
+
+        private ArchiveSummaryHistoryTransfer(
+                @NonNull String direction,
+                @NonNull String amount,
+                boolean hasPaid,
+                boolean canPayNow,
+                @NonNull String recipientPhoneNumber,
+                @NonNull BigDecimal amountValue,
+                @Nullable ReceiptHistoryStore.HistoryItem sourceItem
+        ) {
+            this.direction = direction;
+            this.amount = amount;
+            this.hasPaid = hasPaid;
+            this.canPayNow = canPayNow;
+            this.recipientPhoneNumber = recipientPhoneNumber;
+            this.amountValue = amountValue;
+            this.sourceItem = sourceItem;
+        }
+    }
+
+    private static final class ReceiptHistoryTransfer {
+        @NonNull
+        private final String direction;
+        @NonNull
+        private final String amount;
+        private final boolean hasPaid;
+        private final boolean canPayNow;
+        @NonNull
+        private final String debtorParticipantKey;
+        @NonNull
+        private final String recipientPhoneNumber;
+        @NonNull
+        private final BigDecimal amountValue;
+
+        private ReceiptHistoryTransfer(
+                @NonNull String direction,
+                @NonNull String amount,
+                boolean hasPaid,
+                boolean canPayNow,
+                @NonNull String debtorParticipantKey,
+                @NonNull String recipientPhoneNumber,
+                @NonNull BigDecimal amountValue
+        ) {
+            this.direction = direction;
+            this.amount = amount;
+            this.hasPaid = hasPaid;
+            this.canPayNow = canPayNow;
+            this.debtorParticipantKey = debtorParticipantKey;
+            this.recipientPhoneNumber = recipientPhoneNumber;
+            this.amountValue = amountValue;
+        }
+    }
+
+    private static final class HistoryTransferBalance {
+        @NonNull
+        private final ReceiptHistoryStore.ParticipantShare participant;
+        @NonNull
+        private BigDecimal amount;
+
+        private HistoryTransferBalance(
+                @NonNull ReceiptHistoryStore.ParticipantShare participant,
+                @NonNull BigDecimal amount
+        ) {
+            this.participant = participant;
+            this.amount = amount;
         }
     }
 }

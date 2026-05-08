@@ -13,14 +13,19 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class ReceiptHistoryStore {
+    static final String ENTRY_TYPE_RECEIPT = "receipt";
+    static final String ENTRY_TYPE_ARCHIVE_SUMMARY = "archive_summary";
+
     private static final String PREFERENCES_NAME = "receipt_history_preferences";
     private static final String KEY_ENTRIES = "receipt_history_entries";
+    private static final String KEY_ENTRY_TYPE = "entry_type";
     private static final String KEY_RECEIPT_NAME = "receipt_name";
     private static final String KEY_TOTAL_AMOUNT = "total_amount";
     private static final String KEY_SENT_DATE = "sent_date";
     private static final String KEY_MESSAGE = "message";
     private static final String KEY_PARTICIPANTS = "participants";
     private static final String KEY_ITEMS = "items";
+    private static final String KEY_ARCHIVED_RECEIPTS = "archived_receipts";
     private static final String KEY_PARTICIPANT_NAME = "name";
     private static final String KEY_PARTICIPANT_AMOUNT = "amount";
     private static final String KEY_PARTICIPANT_KEY = "key";
@@ -31,6 +36,8 @@ final class ReceiptHistoryStore {
     private static final String KEY_PARTICIPANT_HAS_PAID = "has_paid";
     private static final String KEY_ITEM_NAME = "name";
     private static final String KEY_ITEM_PRICE = "price";
+    private static final String KEY_ITEM_HAS_PAID = "has_paid";
+    private static final String KEY_ITEM_PAYER_PARTICIPANT_KEY = "payer_participant_key";
     private static final String KEY_ITEM_SELECTED_PARTICIPANT_KEYS = "selected_participant_keys";
 
     private ReceiptHistoryStore() {
@@ -81,9 +88,54 @@ final class ReceiptHistoryStore {
                     existingEntry.sentDate,
                     existingEntry.message,
                     updatedParticipants,
-                    existingEntry.items
+                    existingEntry.items,
+                    existingEntry.entryType,
+                    existingEntry.archivedReceipts
             );
             entries.set(index, updatedEntry);
+            saveEntries(context, entries);
+            return updatedEntry;
+        }
+
+        return targetEntry;
+    }
+
+    @NonNull
+    static HistoryEntry markHistoryItemPaid(
+            @NonNull Context context,
+            @NonNull HistoryEntry targetEntry,
+            @NonNull HistoryItem targetItem,
+            boolean hasPaid
+    ) {
+        ArrayList<HistoryEntry> entries = loadEntries(context);
+        for (int entryIndex = 0; entryIndex < entries.size(); entryIndex++) {
+            HistoryEntry existingEntry = entries.get(entryIndex);
+            if (!existingEntry.matches(targetEntry)) {
+                continue;
+            }
+
+            ArrayList<HistoryItem> updatedItems = new ArrayList<>();
+            boolean itemUpdated = false;
+            for (HistoryItem item : existingEntry.items) {
+                if (!itemUpdated && item.matches(targetItem)) {
+                    updatedItems.add(item.copyWithPaidStatus(hasPaid));
+                    itemUpdated = true;
+                } else {
+                    updatedItems.add(item);
+                }
+            }
+
+            HistoryEntry updatedEntry = new HistoryEntry(
+                    existingEntry.receiptName,
+                    existingEntry.totalAmount,
+                    existingEntry.sentDate,
+                    existingEntry.message,
+                    existingEntry.participants,
+                    updatedItems,
+                    existingEntry.entryType,
+                    existingEntry.archivedReceipts
+            );
+            entries.set(entryIndex, updatedEntry);
             saveEntries(context, entries);
             return updatedEntry;
         }
@@ -140,12 +192,14 @@ final class ReceiptHistoryStore {
     }
 
     static final class HistoryEntry {
+        final String entryType;
         final String receiptName;
         final String totalAmount;
         final String sentDate;
         final String message;
         final ArrayList<ParticipantShare> participants;
         final ArrayList<HistoryItem> items;
+        final ArrayList<HistoryEntry> archivedReceipts;
 
         HistoryEntry(
                 @NonNull String receiptName,
@@ -155,12 +209,57 @@ final class ReceiptHistoryStore {
                 @NonNull List<ParticipantShare> participants,
                 @NonNull List<HistoryItem> items
         ) {
+            this(
+                    receiptName,
+                    totalAmount,
+                    sentDate,
+                    message,
+                    participants,
+                    items,
+                    ENTRY_TYPE_RECEIPT,
+                    new ArrayList<>()
+            );
+        }
+
+        HistoryEntry(
+                @NonNull String receiptName,
+                @NonNull String totalAmount,
+                @NonNull String sentDate,
+                @NonNull String message,
+                @NonNull List<ParticipantShare> participants,
+                @NonNull List<HistoryItem> items,
+                @NonNull String entryType
+        ) {
+            this(
+                    receiptName,
+                    totalAmount,
+                    sentDate,
+                    message,
+                    participants,
+                    items,
+                    entryType,
+                    new ArrayList<>()
+            );
+        }
+
+        HistoryEntry(
+                @NonNull String receiptName,
+                @NonNull String totalAmount,
+                @NonNull String sentDate,
+                @NonNull String message,
+                @NonNull List<ParticipantShare> participants,
+                @NonNull List<HistoryItem> items,
+                @NonNull String entryType,
+                @NonNull List<HistoryEntry> archivedReceipts
+        ) {
+            this.entryType = entryType;
             this.receiptName = receiptName;
             this.totalAmount = totalAmount;
             this.sentDate = sentDate;
             this.message = message;
             this.participants = new ArrayList<>(participants);
             this.items = new ArrayList<>(items);
+            this.archivedReceipts = new ArrayList<>(archivedReceipts);
         }
 
         @NonNull
@@ -168,20 +267,26 @@ final class ReceiptHistoryStore {
             JSONObject object = new JSONObject();
             JSONArray participantArray = new JSONArray();
             JSONArray itemArray = new JSONArray();
+            JSONArray archivedReceiptsArray = new JSONArray();
             for (ParticipantShare participant : participants) {
                 participantArray.put(participant.toJson());
             }
             for (HistoryItem item : items) {
                 itemArray.put(item.toJson());
             }
+            for (HistoryEntry archivedReceipt : archivedReceipts) {
+                archivedReceiptsArray.put(archivedReceipt.toJson());
+            }
 
             try {
+                object.put(KEY_ENTRY_TYPE, entryType);
                 object.put(KEY_RECEIPT_NAME, receiptName);
                 object.put(KEY_TOTAL_AMOUNT, totalAmount);
                 object.put(KEY_SENT_DATE, sentDate);
                 object.put(KEY_MESSAGE, message);
                 object.put(KEY_PARTICIPANTS, participantArray);
                 object.put(KEY_ITEMS, itemArray);
+                object.put(KEY_ARCHIVED_RECEIPTS, archivedReceiptsArray);
             } catch (JSONException exception) {
                 throw new IllegalStateException("Unable to serialize history entry", exception);
             }
@@ -215,23 +320,43 @@ final class ReceiptHistoryStore {
                 }
             }
 
+            JSONArray archivedReceiptsArray = object.optJSONArray(KEY_ARCHIVED_RECEIPTS);
+            ArrayList<HistoryEntry> archivedReceipts = new ArrayList<>();
+            if (archivedReceiptsArray != null) {
+                for (int index = 0; index < archivedReceiptsArray.length(); index++) {
+                    JSONObject archivedReceiptObject = archivedReceiptsArray.optJSONObject(index);
+                    if (archivedReceiptObject == null) {
+                        continue;
+                    }
+                    archivedReceipts.add(HistoryEntry.fromJson(archivedReceiptObject));
+                }
+            }
+
             return new HistoryEntry(
                     object.optString(KEY_RECEIPT_NAME, ""),
                     object.optString(KEY_TOTAL_AMOUNT, ""),
                     object.optString(KEY_SENT_DATE, ""),
                     object.optString(KEY_MESSAGE, ""),
                     participants,
-                    items
+                    items,
+                    object.optString(KEY_ENTRY_TYPE, ENTRY_TYPE_RECEIPT),
+                    archivedReceipts
             );
         }
 
+        boolean isArchiveSummary() {
+            return ENTRY_TYPE_ARCHIVE_SUMMARY.equals(entryType);
+        }
+
         private boolean matches(@NonNull HistoryEntry other) {
-            if (!receiptName.equals(other.receiptName)
+            if (!entryType.equals(other.entryType)
+                    || !receiptName.equals(other.receiptName)
                     || !totalAmount.equals(other.totalAmount)
                     || !sentDate.equals(other.sentDate)
                     || !message.equals(other.message)
                     || participants.size() != other.participants.size()
-                    || items.size() != other.items.size()) {
+                    || items.size() != other.items.size()
+                    || archivedReceipts.size() != other.archivedReceipts.size()) {
                 return false;
             }
 
@@ -243,6 +368,12 @@ final class ReceiptHistoryStore {
 
             for (int index = 0; index < items.size(); index++) {
                 if (!items.get(index).matches(other.items.get(index))) {
+                    return false;
+                }
+            }
+
+            for (int index = 0; index < archivedReceipts.size(); index++) {
+                if (!archivedReceipts.get(index).matches(other.archivedReceipts.get(index))) {
                     return false;
                 }
             }
@@ -348,6 +479,9 @@ final class ReceiptHistoryStore {
     static final class HistoryItem {
         final String name;
         final String price;
+        final boolean hasPaid;
+        @NonNull
+        final String payerParticipantKey;
         final ArrayList<String> selectedParticipantKeys;
 
         HistoryItem(
@@ -355,8 +489,38 @@ final class ReceiptHistoryStore {
                 @NonNull String price,
                 @NonNull List<String> selectedParticipantKeys
         ) {
+            this(name, price, false, "", selectedParticipantKeys);
+        }
+
+        HistoryItem(
+                @NonNull String name,
+                @NonNull String price,
+                boolean hasPaid,
+                @NonNull List<String> selectedParticipantKeys
+        ) {
+            this(name, price, hasPaid, "", selectedParticipantKeys);
+        }
+
+        HistoryItem(
+                @NonNull String name,
+                @NonNull String price,
+                @NonNull String payerParticipantKey,
+                @NonNull List<String> selectedParticipantKeys
+        ) {
+            this(name, price, false, payerParticipantKey, selectedParticipantKeys);
+        }
+
+        HistoryItem(
+                @NonNull String name,
+                @NonNull String price,
+                boolean hasPaid,
+                @NonNull String payerParticipantKey,
+                @NonNull List<String> selectedParticipantKeys
+        ) {
             this.name = name;
             this.price = price;
+            this.hasPaid = hasPaid;
+            this.payerParticipantKey = payerParticipantKey;
             this.selectedParticipantKeys = new ArrayList<>(selectedParticipantKeys);
         }
 
@@ -370,6 +534,8 @@ final class ReceiptHistoryStore {
             try {
                 object.put(KEY_ITEM_NAME, name);
                 object.put(KEY_ITEM_PRICE, price);
+                object.put(KEY_ITEM_HAS_PAID, hasPaid);
+                object.put(KEY_ITEM_PAYER_PARTICIPANT_KEY, payerParticipantKey);
                 object.put(KEY_ITEM_SELECTED_PARTICIPANT_KEYS, selectedParticipantsArray);
             } catch (JSONException exception) {
                 throw new IllegalStateException("Unable to serialize history item", exception);
@@ -394,6 +560,8 @@ final class ReceiptHistoryStore {
             return new HistoryItem(
                     object.optString(KEY_ITEM_NAME, ""),
                     object.optString(KEY_ITEM_PRICE, ""),
+                    object.optBoolean(KEY_ITEM_HAS_PAID, false),
+                    object.optString(KEY_ITEM_PAYER_PARTICIPANT_KEY, ""),
                     selectedParticipantKeys
             );
         }
@@ -402,9 +570,22 @@ final class ReceiptHistoryStore {
             return selectedParticipantKeys.contains(participantKey);
         }
 
+        @NonNull
+        HistoryItem copyWithPaidStatus(boolean hasPaid) {
+            return new HistoryItem(
+                    name,
+                    price,
+                    hasPaid,
+                    payerParticipantKey,
+                    selectedParticipantKeys
+            );
+        }
+
         private boolean matches(@NonNull HistoryItem other) {
             if (!name.equals(other.name)
                     || !price.equals(other.price)
+                    || hasPaid != other.hasPaid
+                    || !payerParticipantKey.equals(other.payerParticipantKey)
                     || selectedParticipantKeys.size() != other.selectedParticipantKeys.size()) {
                 return false;
             }

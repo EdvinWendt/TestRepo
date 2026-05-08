@@ -2,6 +2,8 @@
 <resources>
     <color name="brand_teal">#0488D2</color>
     <color name="brand_green">#04D239</color>
+    <color name="brand_orange">#F59E0B</color>
+    <color name="brand_red">#FF3B30</color>
 
     <color name="md_theme_light_primary">#0488D2</color>
     <color name="md_theme_light_onPrimary">#FFFFFF</color>

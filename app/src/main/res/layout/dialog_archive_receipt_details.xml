@@ -32,14 +32,28 @@
 
         <TextView
             android:id="@+id/text_archive_receipt_dialog_title"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_centerInParent="true"
-            android:paddingStart="48dp"
-            android:paddingEnd="48dp"
+            android:layout_centerVertical="true"
+            android:gravity="center"
+            android:paddingStart="56dp"
+            android:paddingEnd="56dp"
             android:textAppearance="?attr/textAppearanceTitleLarge"
             android:textColor="?attr/colorOnPrimary"
             android:textStyle="bold" />
+
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/button_edit_archive_receipt_name"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/edit"
+            android:padding="8dp"
+            android:scaleType="center"
+            android:tint="?attr/colorOnPrimary"
+            app:srcCompat="@drawable/ic_archive_edit_name" />
     </RelativeLayout>
 
     <LinearLayout
@@ -207,7 +221,7 @@
                         android:gravity="center"
                         android:maxLines="1"
                         android:singleLine="true"
-                        android:text="@string/scan_more"
+                        android:text="@string/scan"
                         android:textAlignment="center"
                         android:textColor="?attr/colorPrimary"
                         android:textStyle="bold" />
@@ -303,12 +317,31 @@
             </LinearLayout>
         </androidx.core.widget.NestedScrollView>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/button_save_archive_receipt_changes"
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/save_changes" />
+            android:layout_marginTop="16dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/button_save_archive_receipt_changes"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/save_changes" />
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/button_save_archive_receipt_disabled_info"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="end|center_vertical"
+                android:layout_marginEnd="12dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/save_changes_disabled_reasons"
+                android:padding="6dp"
+                android:scaleType="centerInside"
+                android:tint="?attr/colorOnSurfaceVariant"
+                android:visibility="gone"
+                app:srcCompat="@drawable/ic_warning_outline" />
+        </FrameLayout>
     </LinearLayout>
 
 </LinearLayout>

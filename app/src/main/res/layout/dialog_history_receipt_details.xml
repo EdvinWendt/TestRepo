@@ -67,12 +67,50 @@
                 android:visibility="gone" />
 
             <LinearLayout
-                android:id="@+id/layout_history_receipt_participants"
+                android:id="@+id/layout_history_archive_summary_transfers"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="20dp"
-                android:gravity="center_horizontal"
-                android:orientation="vertical" />
+                android:orientation="vertical"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/layout_history_archive_receipt_sections"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:orientation="vertical"
+                android:visibility="gone" />
+
+            <FrameLayout
+                android:id="@+id/layout_toggle_history_receipt_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:visibility="gone">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_toggle_history_receipt"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/show_receipt"
+                    android:textAllCaps="false" />
+
+                <androidx.appcompat.widget.AppCompatImageView
+                    android:id="@+id/image_toggle_history_receipt_icon"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_gravity="center_vertical|end"
+                    android:layout_marginEnd="16dp"
+                    android:adjustViewBounds="true"
+                    android:clickable="false"
+                    android:contentDescription="@null"
+                    android:focusable="false"
+                    android:scaleType="fitCenter"
+                    android:tint="?attr/colorPrimary"
+                    app:srcCompat="@drawable/ic_history_show_receipt" />
+            </FrameLayout>
 
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/card_history_receipt_items"
@@ -85,12 +123,38 @@
                 app:strokeWidth="0dp">
 
                 <LinearLayout
-                    android:id="@+id/layout_history_receipt_items"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:paddingTop="18dp"
-                    android:paddingBottom="18dp" />
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:paddingBottom="18dp">
+
+                    <LinearLayout
+                        android:id="@+id/layout_history_receipt_participants"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_horizontal"
+                        android:orientation="vertical"
+                        android:visibility="gone" />
+
+                    <View
+                        android:id="@+id/view_history_receipt_participants_divider"
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="16dp"
+                        android:layout_marginBottom="16dp"
+                        android:background="?attr/colorOutlineVariant"
+                        android:visibility="gone" />
+
+                    <LinearLayout
+                        android:id="@+id/layout_history_receipt_items"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone" />
+                </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
         </LinearLayout>
