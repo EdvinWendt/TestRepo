@@ -67,7 +67,7 @@
                 android:contentDescription="@null"
                 android:focusable="false"
                 android:scaleType="fitCenter"
-                app:srcCompat="@drawable/ic_main_archive"
+                app:srcCompat="@drawable/ic_main_archive_bookmark"
                 app:tint="?attr/colorPrimary" />
         </FrameLayout>
 

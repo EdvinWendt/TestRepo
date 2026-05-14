@@ -78,11 +78,7 @@ public class SettingsDialogFragment extends DialogFragment {
         View managePermissionsButton = view.findViewById(R.id.button_manage_permissions);
         View managePreAddedParticipantsButton =
                 view.findViewById(R.id.button_manage_pre_added_participants);
-        View editUsernameButton = view.findViewById(R.id.button_edit_username_nickname);
-        TextView usernameDescriptionView =
-                view.findViewById(R.id.text_settings_username_description);
         MaterialSwitch autoRotateSwitch = view.findViewById(R.id.switch_auto_rotate_image);
-        MaterialSwitch splitItemsSwitch = view.findViewById(R.id.switch_split_items);
         appearanceRowView = view.findViewById(R.id.layout_settings_appearance_row);
         appearanceMenuButton = view.findViewById(R.id.button_settings_appearance_menu);
         appearanceSummaryValueView = view.findViewById(R.id.text_settings_appearance_value);
@@ -90,23 +86,12 @@ public class SettingsDialogFragment extends DialogFragment {
         accentColorMenuButton = view.findViewById(R.id.button_settings_accent_color_menu);
         accentColorSummarySwatchView = view.findViewById(R.id.image_settings_accent_color_swatch);
         accentColorSummaryValueView = view.findViewById(R.id.text_settings_accent_color_value);
-        getParentFragmentManager().setFragmentResultListener(
-                EditUsernameDialogFragment.REQUEST_KEY,
-                getViewLifecycleOwner(),
-                (requestKey, result) -> updateUsernameDescription(usernameDescriptionView)
-        );
         closeButton.setOnClickListener(buttonView -> dismiss());
         managePermissionsButton.setOnClickListener(buttonView ->
                 ManagePermissionsDialogFragment.show(getParentFragmentManager())
         );
         managePreAddedParticipantsButton.setOnClickListener(buttonView ->
                 PreAddedParticipantsDialogFragment.show(getParentFragmentManager())
-        );
-        editUsernameButton.setOnClickListener(
-                buttonView -> EditUsernameDialogFragment.show(
-                        getParentFragmentManager(),
-                        false
-                )
         );
         if (appearanceMenuButton != null) {
             appearanceMenuButton.setOnClickListener(buttonView -> toggleAppearanceMenu());
@@ -115,7 +100,6 @@ public class SettingsDialogFragment extends DialogFragment {
             accentColorMenuButton.setOnClickListener(buttonView -> toggleAccentColorMenu());
         }
 
-        updateUsernameDescription(usernameDescriptionView);
         updateAppearanceSummary();
         updateAccentColorSummary();
 
@@ -123,20 +107,6 @@ public class SettingsDialogFragment extends DialogFragment {
         autoRotateSwitch.setOnCheckedChangeListener(
                 (buttonView, isChecked) ->
                         AppSettings.setAutoRotateImageEnabled(requireContext(), isChecked)
-        );
-        splitItemsSwitch.setChecked(AppSettings.isSplitItemsEnabled(requireContext()));
-        splitItemsSwitch.setOnCheckedChangeListener(
-                (buttonView, isChecked) ->
-                        AppSettings.setSplitItemsEnabled(requireContext(), isChecked)
-        );
-    }
-
-    private void updateUsernameDescription(@NonNull TextView usernameDescriptionView) {
-        usernameDescriptionView.setText(
-                getString(
-                        R.string.settings_username_description,
-                        AppSettings.getUsernameNickname(requireContext())
-                )
         );
     }
 

@@ -326,7 +326,7 @@
                 android:id="@+id/button_save_archive_receipt_changes"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/save_changes" />
+                android:text="@string/summary" />
 
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/button_save_archive_receipt_disabled_info"
@@ -335,7 +335,7 @@
                 android:layout_gravity="end|center_vertical"
                 android:layout_marginEnd="12dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/save_changes_disabled_reasons"
+                android:contentDescription="@string/next_disabled_reasons"
                 android:padding="6dp"
                 android:scaleType="centerInside"
                 android:tint="?attr/colorOnSurfaceVariant"

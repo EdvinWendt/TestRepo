@@ -127,26 +127,17 @@ public class ManagePermissionsDialogFragment extends DialogFragment {
 
         if (contactsDescriptionView != null) {
             contactsDescriptionView.setText(
-                    getString(
-                            R.string.settings_permissions_contacts_description,
-                            getPermissionAccessLabel(Manifest.permission.READ_CONTACTS)
-                    )
+                    getPermissionAccessLabel(Manifest.permission.READ_CONTACTS)
             );
         }
         if (cameraDescriptionView != null) {
             cameraDescriptionView.setText(
-                    getString(
-                            R.string.settings_permissions_camera_description,
-                            getPermissionAccessLabel(Manifest.permission.CAMERA)
-                    )
+                    getPermissionAccessLabel(Manifest.permission.CAMERA)
             );
         }
         if (smsDescriptionView != null) {
             smsDescriptionView.setText(
-                    getString(
-                            R.string.settings_permissions_sms_description,
-                            getPermissionAccessLabel(Manifest.permission.SEND_SMS)
-                    )
+                    getPermissionAccessLabel(Manifest.permission.SEND_SMS)
             );
         }
     }

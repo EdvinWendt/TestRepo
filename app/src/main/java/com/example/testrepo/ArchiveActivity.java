@@ -34,7 +34,9 @@ import android.view.ViewTreeObserver;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
+import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ListAdapter;
 import android.widget.ListView;
@@ -66,6 +68,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -82,16 +85,23 @@ public class ArchiveActivity extends AppCompatActivity {
     private static final int MAX_PARTICIPANT_BUTTONS_PER_ROW = 5;
     private static final int MAX_ITEM_PARTICIPANT_BUTTONS_PER_ROW = 4;
     private static final int UNCHECKED_PARTICIPANT_COLOR = 0xFF8A8A8A;
+    private static final int MIN_RECEIPT_ITEM_QUANTITY = 1;
     private static final int RECEIPT_FILTER_DEFAULT = 0;
     private static final int RECEIPT_FILTER_HIGH_TO_LOW = 1;
     private static final int RECEIPT_FILTER_LOW_TO_HIGH = 2;
     private static final long MENU_ARROW_ROTATION_DURATION_MS = 180L;
+    private static final long ARCHIVE_TREE_TOGGLE_DURATION_MS = 100L;
+    private static final float ARCHIVE_TREE_EXPANDED_ROTATION_DEGREES = 90f;
     private static final String DEFAULT_PARTICIPANT_KEY = "participant_you";
     private static final String DEFAULT_PARTICIPANT_NAME = "You";
     @NonNull
     private String appliedThemeConfigurationKey = "";
 
     private final ArrayList<String> archiveNames = new ArrayList<>();
+    private final ArrayList<ArchiveStore.Archive> archives = new ArrayList<>();
+    private final ArrayList<ReceiptHistoryStore.HistoryEntry> standaloneReceipts = new ArrayList<>();
+    private final ArrayList<ArchiveRootItem> archiveRootItems = new ArrayList<>();
+    private final HashSet<String> expandedArchiveNames = new HashSet<>();
     private final ReceiptParser receiptParser = new ReceiptParser();
     private ArchiveEntriesAdapter archiveEntriesAdapter;
     @Nullable
@@ -102,6 +112,8 @@ public class ArchiveActivity extends AppCompatActivity {
     private PopupWindow archivedReceiptSaveChangesDisabledReasonsPopup;
     @Nullable
     private PopupWindow newArchiveCreateDisabledReasonsPopup;
+    @Nullable
+    private PopupWindow archiveReceiptIncompletePopup;
     @Nullable
     private PopupWindow archivedReceiptItemPayerPopup;
     @Nullable
@@ -143,6 +155,11 @@ public class ArchiveActivity extends AppCompatActivity {
         private final ArrayList<ReceiptHistoryStore.HistoryItem> allItems;
         @NonNull
         private final ArrayList<ReceiptHistoryStore.HistoryItem> items;
+        @NonNull
+        private final LinkedHashMap<
+                ReceiptHistoryStore.HistoryItem,
+                ArrayList<ReceiptHistoryStore.HistoryItem>
+                > visibleItemSources;
         private int filterMode;
 
         private ArchivedReceiptEditState(
@@ -156,6 +173,7 @@ public class ArchiveActivity extends AppCompatActivity {
             this.participants = new ArrayList<>(participants);
             this.allItems = new ArrayList<>(items);
             this.items = new ArrayList<>(items);
+            this.visibleItemSources = new LinkedHashMap<>();
             this.filterMode = RECEIPT_FILTER_DEFAULT;
         }
     }
@@ -205,17 +223,66 @@ public class ArchiveActivity extends AppCompatActivity {
         }
     }
 
+    private static final class ArchiveRootItem {
+        private static final int TYPE_STANDALONE_RECEIPT = 0;
+        private static final int TYPE_FOLDER = 1;
+
+        private final int type;
+        private final int sourceIndex;
+        @Nullable
+        private final ArchiveStore.Archive archive;
+        @Nullable
+        private final ReceiptHistoryStore.HistoryEntry receiptEntry;
+
+        private ArchiveRootItem(
+                int type,
+                int sourceIndex,
+                @Nullable ArchiveStore.Archive archive,
+                @Nullable ReceiptHistoryStore.HistoryEntry receiptEntry
+        ) {
+            this.type = type;
+            this.sourceIndex = sourceIndex;
+            this.archive = archive;
+            this.receiptEntry = receiptEntry;
+        }
+
+        @NonNull
+        private static ArchiveRootItem forArchive(int archiveIndex, @NonNull ArchiveStore.Archive archive) {
+            return new ArchiveRootItem(TYPE_FOLDER, archiveIndex, archive, null);
+        }
+
+        @NonNull
+        private static ArchiveRootItem forStandaloneReceipt(
+                int receiptIndex,
+                @NonNull ReceiptHistoryStore.HistoryEntry receiptEntry
+        ) {
+            return new ArchiveRootItem(TYPE_STANDALONE_RECEIPT, receiptIndex, null, receiptEntry);
+        }
+    }
+
+    private interface OnArchiveReceiptCreatedListener {
+        void onArchiveReceiptCreated(@NonNull ReceiptHistoryStore.HistoryEntry newReceiptEntry);
+    }
+
+    private interface OnArchiveReceiptSavedListener {
+        void onArchiveReceiptSaved(@NonNull ReceiptHistoryStore.HistoryEntry updatedEntry);
+    }
+
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         AppSettings.applyTheme(this);
         appliedThemeConfigurationKey = AppSettings.getThemeConfigurationKey(this);
         super.onCreate(savedInstanceState);
         InstallResetHelper.resetInstallScopedDataIfNeeded(this);
+        if (AuthGateHelper.redirectToLoginIfNeeded(this)) {
+            return;
+        }
         setContentView(R.layout.activity_archive);
 
         View backButton = findViewById(R.id.button_back);
         View settingsMenuButton = findViewById(R.id.button_archive_actions);
         MaterialButton addArchiveButton = findViewById(R.id.button_add_archive);
+        MaterialButton newReceiptButton = findViewById(R.id.button_new_receipt);
         ListView archiveListView = findViewById(R.id.list_archive_receipts);
         backgroundExecutor = Executors.newSingleThreadExecutor();
 
@@ -227,11 +294,15 @@ public class ArchiveActivity extends AppCompatActivity {
                 view -> SettingsMenuHelper.showSettingsMenu(this, view)
         );
         addArchiveButton.setOnClickListener(view -> showNewArchiveDialog());
+        newReceiptButton.setOnClickListener(view -> showSelectFolderForNewReceiptDialog());
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        if (AuthGateHelper.redirectToLoginIfNeeded(this)) {
+            return;
+        }
         if (recreateIfThemeConfigurationChanged()) {
             return;
         }
@@ -252,8 +323,36 @@ public class ArchiveActivity extends AppCompatActivity {
 
     private void loadArchiveNames() {
         archiveNames.clear();
-        archiveNames.addAll(ArchiveStore.loadArchiveNames(this));
+        archives.clear();
+        standaloneReceipts.clear();
+        archiveRootItems.clear();
+
+        archives.addAll(ArchiveStore.loadArchives(this));
+        standaloneReceipts.addAll(ArchiveStore.loadStandaloneReceipts(this));
+        for (ArchiveStore.Archive archive : archives) {
+            archiveNames.add(archive.name);
+        }
+        expandedArchiveNames.retainAll(archiveNames);
+        for (int index = 0; index < archives.size(); index++) {
+            archiveRootItems.add(ArchiveRootItem.forArchive(index, archives.get(index)));
+        }
+        for (int index = 0; index < standaloneReceipts.size(); index++) {
+            archiveRootItems.add(ArchiveRootItem.forStandaloneReceipt(
+                    index,
+                    standaloneReceipts.get(index)
+            ));
+        }
         archiveEntriesAdapter.notifyDataSetChanged();
+    }
+
+    private void expandArchiveByIndex(int archiveIndex) {
+        ArchiveStore.Archive archive = ArchiveStore.loadArchiveAt(this, archiveIndex);
+        if (archive == null) {
+            return;
+        }
+
+        expandedArchiveNames.add(archive.name);
+        loadArchiveNames();
     }
 
     private boolean recreateIfThemeConfigurationChanged() {
@@ -272,10 +371,16 @@ public class ArchiveActivity extends AppCompatActivity {
 
     private void showNewArchiveDialog(@Nullable Runnable onArchiveCreated) {
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_new_archive, null);
+        TextInputLayout archiveNameInputLayout =
+                dialogView.findViewById(R.id.input_layout_archive_name);
         TextInputEditText archiveNameInput = dialogView.findViewById(R.id.input_archive_name);
         MaterialButton createButton = dialogView.findViewById(R.id.button_create_archive);
         AppCompatImageButton disabledInfoButton =
                 dialogView.findViewById(R.id.button_create_archive_disabled_info);
+
+        if (archiveNameInputLayout != null) {
+            archiveNameInputLayout.setHint(getString(R.string.folder_name_label));
+        }
 
         updateNewArchiveCreateButtonState(
                 archiveNameInput,
@@ -302,7 +407,7 @@ public class ArchiveActivity extends AppCompatActivity {
         });
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.new_archive_title)
+                .setTitle(R.string.button_new_folder)
                 .setView(dialogView)
                 .create();
         dialog.setOnDismissListener(dialogInterface ->
@@ -334,6 +439,122 @@ public class ArchiveActivity extends AppCompatActivity {
         });
 
         dialog.show();
+    }
+
+    private void showSelectFolderForNewReceiptDialog() {
+        View dialogView = getLayoutInflater().inflate(
+                R.layout.dialog_select_archive_location,
+                null
+        );
+        View headerView = getLayoutInflater().inflate(
+                R.layout.dialog_select_archive_header,
+                null
+        );
+        TextView headerTitleView = headerView.findViewById(R.id.text_select_archive_header_title);
+        AppCompatImageButton addArchiveButton =
+                headerView.findViewById(R.id.button_select_archive_add);
+        ListView locationsListView = dialogView.findViewById(R.id.list_select_archive_location);
+        TextView emptyView = dialogView.findViewById(R.id.text_select_archive_location_empty);
+        TextInputLayout receiptNameInputLayout =
+                dialogView.findViewById(R.id.input_layout_select_archive_receipt_name);
+        TextInputEditText receiptNameInput =
+                dialogView.findViewById(R.id.edit_select_archive_receipt_name);
+        MaterialButton createButton =
+                dialogView.findViewById(R.id.button_create_selected_receipt);
+        ArrayList<String> locationNames = new ArrayList<>();
+        ArrayAdapter<String> locationsAdapter = new ArrayAdapter<>(
+                this,
+                android.R.layout.simple_list_item_single_choice,
+                locationNames
+        );
+
+        headerTitleView.setText(R.string.select_location_title);
+        emptyView.setText(R.string.select_folder_empty);
+        createButton.setText(R.string.create);
+        locationsListView.setAdapter(locationsAdapter);
+        locationsListView.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
+
+        final int[] selectedArchiveIndex = {-1};
+        Runnable refreshLocations = () -> {
+            locationNames.clear();
+            locationNames.add(getString(R.string.standalone));
+            locationNames.addAll(ArchiveStore.loadArchiveNames(this));
+            locationsAdapter.notifyDataSetChanged();
+            emptyView.setVisibility(View.GONE);
+            locationsListView.setVisibility(View.VISIBLE);
+
+            int checkedPosition = selectedArchiveIndex[0] < 0
+                    ? 0
+                    : Math.min(selectedArchiveIndex[0] + 1, locationNames.size() - 1);
+            locationsListView.setItemChecked(checkedPosition, true);
+            updateSelectLocationCreateButtonState(receiptNameInput, createButton);
+        };
+        refreshLocations.run();
+
+        receiptNameInput.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                if (receiptNameInputLayout != null) {
+                    receiptNameInputLayout.setError(null);
+                }
+                updateSelectLocationCreateButtonState(receiptNameInput, createButton);
+            }
+        });
+
+        locationsListView.setOnItemClickListener((parent, view, position, id) -> {
+            selectedArchiveIndex[0] = position == 0 ? -1 : position - 1;
+            updateSelectLocationCreateButtonState(receiptNameInput, createButton);
+        });
+
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setCustomTitle(headerView)
+                .setView(dialogView)
+                .create();
+
+        addArchiveButton.setOnClickListener(view -> showNewArchiveDialog(() -> {
+            selectedArchiveIndex[0] = 0;
+            refreshLocations.run();
+            locationsListView.setItemChecked(1, true);
+        }));
+
+        createButton.setEnabled(false);
+        createButton.setOnClickListener(view -> {
+            String receiptName = getText(receiptNameInput);
+            if (receiptName.isEmpty()) {
+                updateSelectLocationCreateButtonState(receiptNameInput, createButton);
+                return;
+            }
+
+            ReceiptHistoryStore.HistoryEntry newReceiptEntry =
+                    createEmptyArchiveReceiptEntry(receiptName);
+            dialog.dismiss();
+            if (selectedArchiveIndex[0] < 0) {
+                ArchiveStore.addStandaloneReceipt(this, newReceiptEntry);
+                loadArchiveNames();
+                return;
+            }
+
+            int archiveIndex = selectedArchiveIndex[0];
+            ArchiveStore.addReceiptToArchive(this, archiveIndex, newReceiptEntry);
+            expandArchiveByIndex(archiveIndex);
+        });
+
+        dialog.show();
+    }
+
+    private void updateSelectLocationCreateButtonState(
+            @NonNull TextInputEditText receiptNameInput,
+            @NonNull MaterialButton createButton
+    ) {
+        createButton.setEnabled(!getText(receiptNameInput).isEmpty());
     }
 
     private void updateNewArchiveCreateButtonState(
@@ -588,6 +809,38 @@ public class ArchiveActivity extends AppCompatActivity {
             @NonNull ReceiptHistoryStore.HistoryEntry entry,
             @NonNull Runnable onReceiptSaved
     ) {
+        showArchivedReceiptDetailsDialog(
+                entry,
+                updatedEntry -> {
+                    archiveReceipts.set(receiptIndex, updatedEntry);
+                    ArchiveStore.updateReceiptAt(this, archiveIndex, receiptIndex, updatedEntry);
+                },
+                onReceiptSaved
+        );
+    }
+
+    private void showStandaloneReceiptDetailsDialog(int receiptIndex) {
+        if (receiptIndex < 0 || receiptIndex >= standaloneReceipts.size()) {
+            return;
+        }
+
+        showArchivedReceiptDetailsDialog(
+                standaloneReceipts.get(receiptIndex),
+                updatedEntry -> ArchiveStore.updateStandaloneReceiptAt(
+                        this,
+                        receiptIndex,
+                        updatedEntry
+                ),
+                () -> {
+                }
+        );
+    }
+
+    private void showArchivedReceiptDetailsDialog(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull OnArchiveReceiptSavedListener onArchiveReceiptSavedListener,
+            @NonNull Runnable onReceiptSaved
+    ) {
         View dialogView = LayoutInflater.from(this)
                 .inflate(R.layout.dialog_archive_receipt_details, null);
         TextView titleView = dialogView.findViewById(R.id.text_archive_receipt_dialog_title);
@@ -596,9 +849,9 @@ public class ArchiveActivity extends AppCompatActivity {
                 dialogView.findViewById(R.id.button_close_archive_receipt);
         AppCompatImageButton editNameButton =
                 dialogView.findViewById(R.id.button_edit_archive_receipt_name);
-        AppCompatImageButton saveChangesDisabledInfoButton =
+        AppCompatImageButton summaryDisabledInfoButton =
                 dialogView.findViewById(R.id.button_save_archive_receipt_disabled_info);
-        MaterialButton saveChangesButton =
+        MaterialButton summaryButton =
                 dialogView.findViewById(R.id.button_save_archive_receipt_changes);
         View addParticipantAction =
                 dialogView.findViewById(R.id.action_archive_add_participant);
@@ -612,6 +865,7 @@ public class ArchiveActivity extends AppCompatActivity {
                 dialogView.findViewById(R.id.text_archive_receipt_items_empty);
         TextView totalValueView = dialogView.findViewById(R.id.text_archive_receipt_total_value);
         ArchivedReceiptEditState editState = createArchivedReceiptEditState(entry);
+        rebuildArchivedReceiptVisibleItems(editState);
         final Runnable[] refreshContentHolder = new Runnable[1];
         final ArchivedReceiptItemsAdapter[] itemsAdapterHolder = new ArchivedReceiptItemsAdapter[1];
 
@@ -636,11 +890,11 @@ public class ArchiveActivity extends AppCompatActivity {
             updateArchivedReceiptItemsEmptyState(itemsListView, itemsEmptyView, editState);
             updateArchivedReceiptTotal(totalValueView, editState);
             ArrayList<String> disabledReasons =
-                    buildArchivedReceiptSaveChangesDisabledReasons(entry, editState);
-            boolean saveChangesEnabled = disabledReasons.isEmpty();
-            saveChangesButton.setEnabled(saveChangesEnabled);
-            saveChangesDisabledInfoButton.setVisibility(
-                    saveChangesEnabled ? View.GONE : View.VISIBLE
+                    buildArchivedReceiptSummaryDisabledReasons(editState);
+            boolean summaryEnabled = disabledReasons.isEmpty();
+            summaryButton.setEnabled(summaryEnabled);
+            summaryDisabledInfoButton.setVisibility(
+                    summaryEnabled ? View.GONE : View.VISIBLE
             );
             dismissArchivedReceiptSaveChangesDisabledReasonsPopup();
             if (itemsAdapterHolder[0] != null) {
@@ -663,29 +917,35 @@ public class ArchiveActivity extends AppCompatActivity {
         editNameButton.setOnClickListener(view ->
                 showEditArchivedReceiptNameDialog(editState, titleView, refreshContentHolder[0])
         );
-        saveChangesDisabledInfoButton.setOnClickListener(view ->
+        summaryDisabledInfoButton.setOnClickListener(view ->
                 showArchivedReceiptSaveChangesDisabledReasonsPopup(
-                        saveChangesButton,
-                        buildArchivedReceiptSaveChangesDisabledReasons(entry, editState)
+                        summaryButton,
+                        buildArchivedReceiptSummaryDisabledReasons(editState)
                 )
         );
         refreshContentHolder[0].run();
 
         Dialog dialog = new Dialog(this, AppSettings.getAppThemeResId(this));
         dialog.setContentView(dialogView);
-        closeButton.setOnClickListener(view ->
-                handleArchiveReceiptDialogExit(dialog, saveChangesButton)
-        );
+        closeButton.setOnClickListener(view -> {
+            ReceiptHistoryStore.HistoryEntry updatedEntry =
+                    buildArchivedReceiptEntry(entry, editState);
+            onArchiveReceiptSavedListener.onArchiveReceiptSaved(updatedEntry);
+            loadArchiveNames();
+            onReceiptSaved.run();
+            dialog.dismiss();
+            Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show();
+        });
         dialog.setOnDismissListener(dialogInterface ->
                 dismissArchivedReceiptSaveChangesDisabledReasonsPopup()
         );
-        saveChangesButton.setOnClickListener(view -> {
+        summaryButton.setOnClickListener(view -> {
             ReceiptHistoryStore.HistoryEntry updatedEntry =
                     buildArchivedReceiptEntry(entry, editState);
-            archiveReceipts.set(receiptIndex, updatedEntry);
-            ArchiveStore.updateReceiptAt(this, archiveIndex, receiptIndex, updatedEntry);
+            onArchiveReceiptSavedListener.onArchiveReceiptSaved(updatedEntry);
+            loadArchiveNames();
             onReceiptSaved.run();
-            dialog.dismiss();
+            showArchivedReceiptSummaryDialog(updatedEntry);
         });
         dialog.show();
         if (dialog.getWindow() != null) {
@@ -714,6 +974,7 @@ public class ArchiveActivity extends AppCompatActivity {
 
         ArrayList<ArchiveSummaryTransfer> transfers =
                 buildArchiveSummaryTransfers(archiveReceipts);
+        boolean hasPendingPayments = !transfers.isEmpty();
         if (transfers.isEmpty()) {
             emptyView.setVisibility(View.VISIBLE);
         } else {
@@ -758,11 +1019,16 @@ public class ArchiveActivity extends AppCompatActivity {
             public void afterTextChanged(Editable s) {
                 requestNameInputLayout.setError(null);
                 sendRequestsButton.setEnabled(
-                        isArchiveSummaryRequestNameEntered(requestNameInputView)
+                        hasPendingPayments
+                                && isArchiveSummaryRequestNameEntered(requestNameInputView)
                 );
             }
         });
-        sendRequestsButton.setEnabled(isArchiveSummaryRequestNameEntered(requestNameInputView));
+        requestNameInputLayout.setEnabled(hasPendingPayments);
+        requestNameInputView.setEnabled(hasPendingPayments);
+        sendRequestsButton.setEnabled(
+                hasPendingPayments && isArchiveSummaryRequestNameEntered(requestNameInputView)
+        );
 
         Dialog dialog = new Dialog(this, AppSettings.getFullScreenDialogThemeResId(this));
         dialog.setContentView(dialogView);
@@ -775,6 +1041,102 @@ public class ArchiveActivity extends AppCompatActivity {
             showArchiveSummarySendRequestsConfirmationDialog(
                     getText(requestNameInputView),
                     archiveReceipts,
+                    dialog
+            );
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+            );
+        }
+    }
+
+    private void showArchivedReceiptSummaryDialog(
+            @NonNull ReceiptHistoryStore.HistoryEntry receiptEntry
+    ) {
+        View dialogView = getLayoutInflater().inflate(R.layout.dialog_receipt_summary, null);
+        LinearLayout transfersLayout =
+                dialogView.findViewById(R.id.layout_receipt_summary_transfers);
+        TextView emptyView = dialogView.findViewById(R.id.text_receipt_summary_empty);
+        TextInputLayout requestNameInputLayout =
+                dialogView.findViewById(R.id.input_layout_receipt_summary_receipt_name);
+        TextInputEditText requestNameInputView =
+                dialogView.findViewById(R.id.edit_receipt_summary_receipt_name);
+        View closeButton = dialogView.findViewById(R.id.button_close_receipt_summary);
+        MaterialButton sendRequestsButton = dialogView.findViewById(R.id.button_send_requests);
+
+        ArrayList<ReceiptHistoryStore.HistoryEntry> summaryReceipts = new ArrayList<>();
+        summaryReceipts.add(receiptEntry);
+        ArrayList<ArchiveSummaryTransfer> transfers = buildArchiveSummaryTransfers(summaryReceipts);
+        boolean hasPendingPayments = !transfers.isEmpty();
+        if (transfers.isEmpty()) {
+            emptyView.setVisibility(View.VISIBLE);
+        } else {
+            emptyView.setVisibility(View.GONE);
+            for (ArchiveSummaryTransfer transfer : transfers) {
+                View rowView = getLayoutInflater().inflate(
+                        R.layout.item_archive_summary_transfer,
+                        transfersLayout,
+                        false
+                );
+                TextView directionView =
+                        rowView.findViewById(R.id.text_archive_summary_transfer_direction);
+                TextView amountView =
+                        rowView.findViewById(R.id.text_archive_summary_transfer_amount);
+                directionView.setText(getString(
+                        R.string.receipt_summary_transfer_direction_arrow,
+                        transfer.fromParticipantName,
+                        transfer.toParticipantName
+                ));
+                amountView.setText(getString(
+                        R.string.archive_summary_transfer_amount,
+                        formatCurrency(transfer.amount)
+                ));
+                transfersLayout.addView(rowView);
+            }
+        }
+
+        requestNameInputView.setFilters(new InputFilter[]{
+                createArchiveSummaryRequestNameInputFilter(),
+                new InputFilter.LengthFilter(20)
+        });
+        requestNameInputView.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                requestNameInputLayout.setError(null);
+                sendRequestsButton.setEnabled(
+                        hasPendingPayments
+                                && isArchiveSummaryRequestNameEntered(requestNameInputView)
+                );
+            }
+        });
+        requestNameInputLayout.setEnabled(hasPendingPayments);
+        requestNameInputView.setEnabled(hasPendingPayments);
+        sendRequestsButton.setEnabled(
+                hasPendingPayments && isArchiveSummaryRequestNameEntered(requestNameInputView)
+        );
+
+        Dialog dialog = new Dialog(this, AppSettings.getFullScreenDialogThemeResId(this));
+        dialog.setContentView(dialogView);
+        closeButton.setOnClickListener(view -> dialog.dismiss());
+        sendRequestsButton.setOnClickListener(view -> {
+            if (!validateArchiveSummaryRequestName(requestNameInputLayout, requestNameInputView)) {
+                return;
+            }
+
+            showArchiveSummarySendRequestsConfirmationDialog(
+                    getText(requestNameInputView),
+                    summaryReceipts,
                     dialog
             );
         });
@@ -1163,38 +1525,6 @@ public class ArchiveActivity extends AppCompatActivity {
                 : normalizeWhitespace(participant.name);
     }
 
-    private void handleArchiveReceiptDialogExit(
-            @NonNull Dialog dialog,
-            @NonNull MaterialButton saveChangesButton
-    ) {
-        if (saveChangesButton.isEnabled()) {
-            showExitWithoutSavingDialog(dialog);
-            return;
-        }
-        dialog.dismiss();
-    }
-
-    private void showExitWithoutSavingDialog(@NonNull Dialog archiveReceiptDialog) {
-        View dialogView = getLayoutInflater().inflate(
-                R.layout.dialog_exit_without_saving_confirmation,
-                null
-        );
-        MaterialButton noButton = dialogView.findViewById(R.id.button_exit_without_saving_no);
-        MaterialButton yesButton = dialogView.findViewById(R.id.button_exit_without_saving_yes);
-
-        AlertDialog confirmationDialog = new MaterialAlertDialogBuilder(this)
-                .setView(dialogView)
-                .create();
-
-        noButton.setOnClickListener(view -> confirmationDialog.dismiss());
-        yesButton.setOnClickListener(view -> {
-            confirmationDialog.dismiss();
-            archiveReceiptDialog.dismiss();
-        });
-
-        confirmationDialog.show();
-    }
-
     private void showEditArchivedReceiptNameDialog(
             @NonNull ArchivedReceiptEditState editState,
             @NonNull TextView titleView,
@@ -1261,6 +1591,18 @@ public class ArchiveActivity extends AppCompatActivity {
             @NonNull MaterialButton archiveSummaryButton,
             @NonNull ListView receiptsListView
     ) {
+        showCreateArchiveReceiptDialog(archiveIndex, newReceiptEntry -> {
+            archiveReceipts.add(0, newReceiptEntry);
+            receiptsAdapter.notifyDataSetChanged();
+            archiveSummaryButton.setEnabled(true);
+            receiptsListView.post(() -> receiptsListView.smoothScrollToPosition(0));
+        });
+    }
+
+    private void showCreateArchiveReceiptDialog(
+            int archiveIndex,
+            @Nullable OnArchiveReceiptCreatedListener onArchiveReceiptCreatedListener
+    ) {
         View dialogView = getLayoutInflater().inflate(
                 R.layout.dialog_new_archive_receipt,
                 null
@@ -1299,12 +1641,11 @@ public class ArchiveActivity extends AppCompatActivity {
             ReceiptHistoryStore.HistoryEntry newReceiptEntry =
                     createEmptyArchiveReceiptEntry(receiptName);
             ArchiveStore.addReceiptToArchive(this, archiveIndex, newReceiptEntry);
-            archiveReceipts.add(0, newReceiptEntry);
-            receiptsAdapter.notifyDataSetChanged();
-            archiveSummaryButton.setEnabled(true);
             loadArchiveNames();
-            receiptsListView.post(() -> receiptsListView.smoothScrollToPosition(0));
             dialog.dismiss();
+            if (onArchiveReceiptCreatedListener != null) {
+                onArchiveReceiptCreatedListener.onArchiveReceiptCreated(newReceiptEntry);
+            }
         });
 
         dialog.show();
@@ -1420,7 +1761,13 @@ public class ArchiveActivity extends AppCompatActivity {
 
     private void rebuildArchivedReceiptVisibleItems(@NonNull ArchivedReceiptEditState editState) {
         editState.items.clear();
-        editState.items.addAll(editState.allItems);
+        editState.visibleItemSources.clear();
+        for (ReceiptHistoryStore.HistoryItem sourceItem : editState.allItems) {
+            editState.items.add(sourceItem);
+            ArrayList<ReceiptHistoryStore.HistoryItem> sourceItems = new ArrayList<>();
+            sourceItems.add(sourceItem);
+            editState.visibleItemSources.put(sourceItem, sourceItems);
+        }
 
         if (editState.filterMode == RECEIPT_FILTER_HIGH_TO_LOW) {
             editState.items.sort((first, second) -> parseCurrencyAmount(second.price)
@@ -1440,6 +1787,97 @@ public class ArchiveActivity extends AppCompatActivity {
         return parseCurrencyAmount(item.price);
     }
 
+    private int getArchivedReceiptItemQuantity(@NonNull ReceiptHistoryStore.HistoryItem item) {
+        String normalizedName = normalizeWhitespace(item.name);
+        if (normalizedName.startsWith("(")) {
+            int closeParenIndex = normalizedName.indexOf(')');
+            if (closeParenIndex > 1 && closeParenIndex < normalizedName.length() - 1) {
+                String quantityText = normalizedName.substring(1, closeParenIndex).trim();
+                try {
+                    int parsedQuantity = Integer.parseInt(quantityText);
+                    if (parsedQuantity >= MIN_RECEIPT_ITEM_QUANTITY) {
+                        return parsedQuantity;
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        return MIN_RECEIPT_ITEM_QUANTITY;
+    }
+
+    @NonNull
+    private String getArchivedReceiptItemCanonicalName(@NonNull String itemName) {
+        String canonicalName = normalizeWhitespace(receiptParser.getCanonicalItemName(itemName));
+        return canonicalName.isEmpty() ? itemName.trim() : canonicalName;
+    }
+
+    @NonNull
+    private String buildArchivedReceiptItemDisplayName(
+            @NonNull String canonicalName,
+            int quantity
+    ) {
+        int normalizedQuantity = Math.max(MIN_RECEIPT_ITEM_QUANTITY, quantity);
+        if (normalizedQuantity <= 1) {
+            return canonicalName;
+        }
+        return "(" + normalizedQuantity + ") " + canonicalName;
+    }
+
+    private int getArchivedReceiptItemUnitAmountCents(
+            @NonNull ReceiptHistoryStore.HistoryItem item
+    ) {
+        return divideArchivedReceiptAmountCents(
+                parseArchivedReceiptItemPriceToCents(item.price),
+                getArchivedReceiptItemQuantity(item)
+        );
+    }
+
+    private int divideArchivedReceiptAmountCents(int totalAmountCents, int quantity) {
+        int normalizedQuantity = Math.max(MIN_RECEIPT_ITEM_QUANTITY, quantity);
+        BigDecimal unitAmount = BigDecimal.valueOf(totalAmountCents, 2).divide(
+                BigDecimal.valueOf(normalizedQuantity),
+                2,
+                RoundingMode.HALF_UP
+        );
+        return unitAmount.movePointRight(2)
+                .setScale(0, RoundingMode.HALF_UP)
+                .intValue();
+    }
+
+    private int multiplyArchivedReceiptAmountCents(int unitAmountCents, int quantity) {
+        long multipliedAmount =
+                (long) unitAmountCents * Math.max(MIN_RECEIPT_ITEM_QUANTITY, quantity);
+        if (multipliedAmount > Integer.MAX_VALUE) {
+            return Integer.MAX_VALUE;
+        }
+        if (multipliedAmount < Integer.MIN_VALUE) {
+            return Integer.MIN_VALUE;
+        }
+        return (int) multipliedAmount;
+    }
+
+    @NonNull
+    private ReceiptHistoryStore.HistoryItem createArchivedReceiptHistoryItem(
+            @NonNull String itemName,
+            int unitAmountCents,
+            int quantity,
+            boolean hasPaid,
+            @NonNull String payerParticipantKey,
+            @NonNull List<String> selectedParticipantKeys
+    ) {
+        String canonicalName = getArchivedReceiptItemCanonicalName(itemName);
+        int normalizedQuantity = Math.max(MIN_RECEIPT_ITEM_QUANTITY, quantity);
+        return new ReceiptHistoryStore.HistoryItem(
+                buildArchivedReceiptItemDisplayName(canonicalName, normalizedQuantity),
+                receiptParser.formatAmount(
+                        multiplyArchivedReceiptAmountCents(unitAmountCents, normalizedQuantity)
+                ),
+                hasPaid,
+                payerParticipantKey,
+                selectedParticipantKeys
+        );
+    }
+
     private void showAddArchivedReceiptItemDialog(
             @NonNull ArchivedReceiptEditState editState,
             @NonNull Runnable refreshReceiptDetails
@@ -1453,6 +1891,8 @@ public class ArchiveActivity extends AppCompatActivity {
                 dialogView.findViewById(R.id.edit_receipt_item_name);
         TextInputEditText priceInputView =
                 dialogView.findViewById(R.id.edit_receipt_item_price);
+        TextInputEditText quantityInputView =
+                dialogView.findViewById(R.id.edit_receipt_item_quantity);
         MaterialCardView payerSelectorView =
                 dialogView.findViewById(R.id.button_receipt_item_payer_selector);
         AppCompatImageView payerValueSwatchView =
@@ -1461,6 +1901,10 @@ public class ArchiveActivity extends AppCompatActivity {
                 dialogView.findViewById(R.id.text_receipt_item_payer_value);
         AppCompatImageButton payerMenuButton =
                 dialogView.findViewById(R.id.button_receipt_item_payer_menu);
+        MaterialButton decreaseQuantityButton =
+                dialogView.findViewById(R.id.button_decrease_receipt_item_quantity);
+        MaterialButton increaseQuantityButton =
+                dialogView.findViewById(R.id.button_increase_receipt_item_quantity);
         MaterialButton addButton =
                 dialogView.findViewById(R.id.button_add_receipt_item_confirm);
         final String[] selectedPayerParticipantKeyHolder = new String[]{""};
@@ -1476,27 +1920,35 @@ public class ArchiveActivity extends AppCompatActivity {
                 editState,
                 selectedPayerParticipantKeyHolder[0]
         );
+        setupArchivedReceiptItemQuantityControls(
+                quantityInputView,
+                decreaseQuantityButton,
+                increaseQuantityButton
+        );
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.add_new_item_title)
                 .setView(dialogView)
                 .create();
 
-        View.OnClickListener openPayerMenuClickListener = view -> toggleArchivedReceiptItemPayerMenu(
-                payerSelectorView,
-                payerMenuButton,
-                editState,
-                selectedPayerParticipantKeyHolder[0],
-                selectedPayerParticipantKey -> {
-                    selectedPayerParticipantKeyHolder[0] = selectedPayerParticipantKey;
-                    updateArchivedReceiptItemPayerSummary(
-                            payerValueSwatchView,
-                            payerValueView,
-                            editState,
-                            selectedPayerParticipantKeyHolder[0]
-                    );
-                }
-        );
+        View.OnClickListener openPayerMenuClickListener = view -> {
+            hideKeyboardForFocusedView(dialogView);
+            toggleArchivedReceiptItemPayerMenu(
+                    payerSelectorView,
+                    payerMenuButton,
+                    editState,
+                    selectedPayerParticipantKeyHolder[0],
+                    selectedPayerParticipantKey -> {
+                        selectedPayerParticipantKeyHolder[0] = selectedPayerParticipantKey;
+                        updateArchivedReceiptItemPayerSummary(
+                                payerValueSwatchView,
+                                payerValueView,
+                                editState,
+                                selectedPayerParticipantKeyHolder[0]
+                        );
+                    }
+            );
+        };
         payerSelectorView.setOnClickListener(openPayerMenuClickListener);
         payerMenuButton.setOnClickListener(openPayerMenuClickListener);
         addButton.setOnClickListener(view -> {
@@ -1522,12 +1974,14 @@ public class ArchiveActivity extends AppCompatActivity {
                 return;
             }
 
+            int quantity = normalizeArchivedReceiptItemQuantity(quantityInputView);
             dismissArchivedReceiptItemPayerPopup();
-            addArchivedReceiptItem(
+            addArchivedReceiptItems(
                     editState,
                     itemName,
                     amountCents,
-                    selectedPayerParticipantKeyHolder[0]
+                    selectedPayerParticipantKeyHolder[0],
+                    quantity
             );
             refreshReceiptDetails.run();
             dialog.dismiss();
@@ -1536,22 +1990,148 @@ public class ArchiveActivity extends AppCompatActivity {
         dialog.show();
     }
 
+    private void setupArchivedReceiptItemQuantityControls(
+            @NonNull TextInputEditText quantityInputView,
+            @NonNull MaterialButton decreaseQuantityButton,
+            @NonNull MaterialButton increaseQuantityButton
+    ) {
+        setArchivedReceiptItemQuantityValue(quantityInputView, MIN_RECEIPT_ITEM_QUANTITY);
+        boolean[] isUpdatingQuantity = new boolean[]{false};
+        Runnable refreshDecreaseButtonState = () -> decreaseQuantityButton.setEnabled(
+                parseArchivedReceiptItemQuantity(getText(quantityInputView))
+                        > MIN_RECEIPT_ITEM_QUANTITY
+        );
+
+        quantityInputView.setInputType(InputType.TYPE_CLASS_NUMBER);
+        quantityInputView.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable editable) {
+                if (isUpdatingQuantity[0]) {
+                    return;
+                }
+
+                String quantityText = editable == null ? "" : editable.toString().trim();
+                if (quantityText.isEmpty()) {
+                    refreshDecreaseButtonState.run();
+                    return;
+                }
+
+                int parsedQuantity = parseArchivedReceiptItemQuantity(quantityText);
+                int normalizedQuantity = Math.max(MIN_RECEIPT_ITEM_QUANTITY, parsedQuantity);
+                String normalizedQuantityText = String.valueOf(normalizedQuantity);
+                if (!normalizedQuantityText.equals(quantityText)) {
+                    isUpdatingQuantity[0] = true;
+                    setArchivedReceiptItemQuantityValue(quantityInputView, normalizedQuantity);
+                    isUpdatingQuantity[0] = false;
+                }
+                refreshDecreaseButtonState.run();
+            }
+        });
+        quantityInputView.setOnFocusChangeListener((view, hasFocus) -> {
+            if (!hasFocus) {
+                normalizeArchivedReceiptItemQuantity(quantityInputView);
+            }
+            refreshDecreaseButtonState.run();
+        });
+        decreaseQuantityButton.setOnClickListener(view -> {
+            int quantity = normalizeArchivedReceiptItemQuantity(quantityInputView);
+            setArchivedReceiptItemQuantityValue(
+                    quantityInputView,
+                    Math.max(MIN_RECEIPT_ITEM_QUANTITY, quantity - 1)
+            );
+            refreshDecreaseButtonState.run();
+        });
+        increaseQuantityButton.setOnClickListener(view -> {
+            int quantity = Math.max(
+                    MIN_RECEIPT_ITEM_QUANTITY,
+                    parseArchivedReceiptItemQuantity(getText(quantityInputView))
+            );
+            if (quantity < Integer.MAX_VALUE) {
+                quantity++;
+            }
+            setArchivedReceiptItemQuantityValue(quantityInputView, quantity);
+            refreshDecreaseButtonState.run();
+        });
+        refreshDecreaseButtonState.run();
+    }
+
+    private int normalizeArchivedReceiptItemQuantity(@NonNull TextInputEditText quantityInputView) {
+        int normalizedQuantity = Math.max(
+                MIN_RECEIPT_ITEM_QUANTITY,
+                parseArchivedReceiptItemQuantity(getText(quantityInputView))
+        );
+        setArchivedReceiptItemQuantityValue(quantityInputView, normalizedQuantity);
+        return normalizedQuantity;
+    }
+
+    private int parseArchivedReceiptItemQuantity(@Nullable String quantityText) {
+        String normalizedQuantityText = normalizeWhitespace(quantityText);
+        if (normalizedQuantityText.isEmpty()) {
+            return 0;
+        }
+        try {
+            long parsedQuantity = Long.parseLong(normalizedQuantityText);
+            if (parsedQuantity < MIN_RECEIPT_ITEM_QUANTITY) {
+                return 0;
+            }
+            return parsedQuantity > Integer.MAX_VALUE
+                    ? Integer.MAX_VALUE
+                    : (int) parsedQuantity;
+        } catch (NumberFormatException exception) {
+            return 0;
+        }
+    }
+
+    private void setArchivedReceiptItemQuantityValue(
+            @NonNull TextInputEditText quantityInputView,
+            int quantity
+    ) {
+        String quantityText = String.valueOf(Math.max(MIN_RECEIPT_ITEM_QUANTITY, quantity));
+        quantityInputView.setText(quantityText);
+        if (quantityInputView.getText() != null) {
+            quantityInputView.setSelection(quantityInputView.getText().length());
+        }
+    }
+
     private void addArchivedReceiptItem(
             @NonNull ArchivedReceiptEditState editState,
             @NonNull String itemName,
             int amountCents,
             @Nullable String payerParticipantKey
     ) {
+        addArchivedReceiptItems(editState, itemName, amountCents, payerParticipantKey, 1);
+    }
+
+    private void addArchivedReceiptItems(
+            @NonNull ArchivedReceiptEditState editState,
+            @NonNull String itemName,
+            int amountCents,
+            @Nullable String payerParticipantKey,
+            int quantity
+    ) {
         ArrayList<String> selectedParticipantKeys = new ArrayList<>();
         for (ReceiptHistoryStore.ParticipantShare participant : editState.participants) {
             selectedParticipantKeys.add(participant.key);
         }
 
-        ReceiptHistoryStore.HistoryItem item = new ReceiptHistoryStore.HistoryItem(
+        int normalizedQuantity = Math.max(MIN_RECEIPT_ITEM_QUANTITY, quantity);
+        String normalizedPayerParticipantKey =
+                normalizeArchivedReceiptItemPayerKey(editState, payerParticipantKey);
+        ReceiptHistoryStore.HistoryItem item = createArchivedReceiptHistoryItem(
                 itemName,
-                receiptParser.formatAmount(amountCents),
-                normalizeArchivedReceiptItemPayerKey(editState, payerParticipantKey),
-                selectedParticipantKeys
+                amountCents,
+                normalizedQuantity,
+                false,
+                normalizedPayerParticipantKey,
+                new ArrayList<>(selectedParticipantKeys)
         );
         editState.allItems.add(item);
         rebuildArchivedReceiptVisibleItems(editState);
@@ -2208,9 +2788,27 @@ public class ArchiveActivity extends AppCompatActivity {
             @NonNull ArchivedReceiptEditState editState,
             @NonNull Runnable refreshReceiptDetails
     ) {
-        editState.allItems.remove(item);
-        editState.items.remove(item);
+        List<ReceiptHistoryStore.HistoryItem> sourceItems =
+                getArchivedReceiptVisibleSourceItems(editState, item);
+        editState.allItems.removeAll(sourceItems);
+        rebuildArchivedReceiptVisibleItems(editState);
         refreshReceiptDetails.run();
+    }
+
+    @NonNull
+    private List<ReceiptHistoryStore.HistoryItem> getArchivedReceiptVisibleSourceItems(
+            @NonNull ArchivedReceiptEditState editState,
+            @NonNull ReceiptHistoryStore.HistoryItem item
+    ) {
+        ArrayList<ReceiptHistoryStore.HistoryItem> sourceItems =
+                editState.visibleItemSources.get(item);
+        if (sourceItems != null && !sourceItems.isEmpty()) {
+            return sourceItems;
+        }
+
+        ArrayList<ReceiptHistoryStore.HistoryItem> fallbackItems = new ArrayList<>();
+        fallbackItems.add(item);
+        return fallbackItems;
     }
 
     private void showEditArchivedReceiptItemDialog(
@@ -2218,6 +2816,8 @@ public class ArchiveActivity extends AppCompatActivity {
             @NonNull ArchivedReceiptEditState editState,
             @NonNull Runnable refreshReceiptDetails
     ) {
+        List<ReceiptHistoryStore.HistoryItem> sourceItems =
+                getArchivedReceiptVisibleSourceItems(editState, item);
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_edit_receipt_item, null);
         TextInputLayout nameInputLayout =
                 dialogView.findViewById(R.id.input_layout_receipt_item_name);
@@ -2227,6 +2827,8 @@ public class ArchiveActivity extends AppCompatActivity {
                 dialogView.findViewById(R.id.edit_receipt_item_name);
         TextInputEditText priceInputView =
                 dialogView.findViewById(R.id.edit_receipt_item_price);
+        TextInputEditText quantityInputView =
+                dialogView.findViewById(R.id.edit_receipt_item_quantity);
         MaterialCardView payerSelectorView =
                 dialogView.findViewById(R.id.button_receipt_item_payer_selector);
         AppCompatImageView payerValueSwatchView =
@@ -2235,17 +2837,28 @@ public class ArchiveActivity extends AppCompatActivity {
                 dialogView.findViewById(R.id.text_receipt_item_payer_value);
         AppCompatImageButton payerMenuButton =
                 dialogView.findViewById(R.id.button_receipt_item_payer_menu);
+        MaterialButton decreaseQuantityButton =
+                dialogView.findViewById(R.id.button_decrease_receipt_item_quantity);
+        MaterialButton increaseQuantityButton =
+                dialogView.findViewById(R.id.button_increase_receipt_item_quantity);
         MaterialButton removeButton =
                 dialogView.findViewById(R.id.button_remove_receipt_item);
+        MaterialButton splitCombineButton =
+                dialogView.findViewById(R.id.button_split_combine_receipt_item);
 
-        String originalName = item.name;
-        int originalAmountCents = parseArchivedReceiptItemPriceToCents(item.price);
+        String normalizedOriginalName = receiptParser.getCanonicalItemName(item.name);
+        final String originalName = normalizedOriginalName.trim().isEmpty()
+                ? item.name
+                : normalizedOriginalName;
+        int originalAmountCents = parseArchivedReceiptItemPriceToCents(sourceItems.get(0).price);
+        int originalQuantity = getArchivedReceiptItemQuantity(item);
+        int originalUnitAmountCents = getArchivedReceiptItemUnitAmountCents(item);
         String originalPayerParticipantKey =
                 normalizeArchivedReceiptItemPayerKey(editState, item.payerParticipantKey);
         final String[] selectedPayerParticipantKeyHolder =
                 new String[]{originalPayerParticipantKey};
 
-        nameInputView.setText(item.name);
+        nameInputView.setText(originalName);
         if (nameInputView.getText() != null) {
             nameInputView.setSelection(nameInputView.getText().length());
         }
@@ -2254,40 +2867,78 @@ public class ArchiveActivity extends AppCompatActivity {
                         | InputType.TYPE_NUMBER_FLAG_DECIMAL
                         | InputType.TYPE_NUMBER_FLAG_SIGNED
         );
-        priceInputView.setText(item.price);
+        priceInputView.setText(receiptParser.formatAmount(originalUnitAmountCents));
         if (priceInputView.getText() != null) {
             priceInputView.setSelection(priceInputView.getText().length());
         }
+        setupArchivedReceiptItemQuantityControls(
+                quantityInputView,
+                decreaseQuantityButton,
+                increaseQuantityButton
+        );
+        setArchivedReceiptItemQuantityValue(quantityInputView, originalQuantity);
         updateArchivedReceiptItemPayerSummary(
                 payerValueSwatchView,
                 payerValueView,
                 editState,
                 selectedPayerParticipantKeyHolder[0]
         );
+        Runnable refreshStructureButtonState = () -> updateArchivedReceiptItemStructureButton(
+                splitCombineButton,
+                item,
+                editState,
+                nameInputView,
+                priceInputView,
+                quantityInputView,
+                selectedPayerParticipantKeyHolder[0]
+        );
+        refreshStructureButtonState.run();
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.edit_receipt_item_title)
                 .setView(dialogView)
                 .create();
         boolean[] itemRemoved = new boolean[]{false};
+        boolean[] structureActionApplied = new boolean[]{false};
 
-        View.OnClickListener openPayerMenuClickListener = view -> toggleArchivedReceiptItemPayerMenu(
-                payerSelectorView,
-                payerMenuButton,
-                editState,
-                selectedPayerParticipantKeyHolder[0],
-                selectedPayerParticipantKey -> {
-                    selectedPayerParticipantKeyHolder[0] = selectedPayerParticipantKey;
-                    updateArchivedReceiptItemPayerSummary(
-                            payerValueSwatchView,
-                            payerValueView,
-                            editState,
-                            selectedPayerParticipantKeyHolder[0]
-                    );
-                }
-        );
+        View.OnClickListener openPayerMenuClickListener = view -> {
+            hideKeyboardForFocusedView(dialogView);
+            toggleArchivedReceiptItemPayerMenu(
+                    payerSelectorView,
+                    payerMenuButton,
+                    editState,
+                    selectedPayerParticipantKeyHolder[0],
+                    selectedPayerParticipantKey -> {
+                        selectedPayerParticipantKeyHolder[0] = selectedPayerParticipantKey;
+                        updateArchivedReceiptItemPayerSummary(
+                                payerValueSwatchView,
+                                payerValueView,
+                                editState,
+                                selectedPayerParticipantKeyHolder[0]
+                        );
+                        refreshStructureButtonState.run();
+                    }
+            );
+        };
         payerSelectorView.setOnClickListener(openPayerMenuClickListener);
         payerMenuButton.setOnClickListener(openPayerMenuClickListener);
+        TextWatcher structureButtonTextWatcher = new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                refreshStructureButtonState.run();
+            }
+        };
+        nameInputView.addTextChangedListener(structureButtonTextWatcher);
+        priceInputView.addTextChangedListener(structureButtonTextWatcher);
+        quantityInputView.addTextChangedListener(structureButtonTextWatcher);
 
         removeButton.setOnClickListener(view -> {
             itemRemoved[0] = true;
@@ -2295,23 +2946,44 @@ public class ArchiveActivity extends AppCompatActivity {
             removeArchivedReceiptItem(item, editState, refreshReceiptDetails);
             dialog.dismiss();
         });
+        splitCombineButton.setOnClickListener(view -> {
+            if (applyArchivedReceiptItemStructureAction(
+                    item,
+                    editState,
+                    nameInputLayout,
+                    priceInputLayout,
+                    nameInputView,
+                    priceInputView,
+                    quantityInputView,
+                    selectedPayerParticipantKeyHolder[0],
+                    refreshReceiptDetails
+            )) {
+                structureActionApplied[0] = true;
+                dismissArchivedReceiptItemPayerPopup();
+                dialog.dismiss();
+            }
+        });
 
         dialog.setOnDismissListener(dialogInterface -> {
             dismissArchivedReceiptItemPayerPopup();
-            if (itemRemoved[0]) {
+            if (itemRemoved[0] || structureActionApplied[0]) {
                 return;
             }
             commitEditedArchivedReceiptItemIfValid(
                     item,
+                    sourceItems,
                     editState,
                     originalName,
                     originalAmountCents,
+                    originalQuantity,
+                    originalUnitAmountCents,
                     originalPayerParticipantKey,
                     selectedPayerParticipantKeyHolder[0],
                     nameInputLayout,
                     priceInputLayout,
                     nameInputView,
                     priceInputView,
+                    quantityInputView,
                     refreshReceiptDetails
             );
         });
@@ -2320,19 +2992,24 @@ public class ArchiveActivity extends AppCompatActivity {
 
     private void commitEditedArchivedReceiptItemIfValid(
             @NonNull ReceiptHistoryStore.HistoryItem item,
+            @NonNull List<ReceiptHistoryStore.HistoryItem> sourceItems,
             @NonNull ArchivedReceiptEditState editState,
             @NonNull String originalName,
             int originalAmountCents,
+            int originalQuantity,
+            int originalUnitAmountCents,
             @NonNull String originalPayerParticipantKey,
             @Nullable String selectedPayerParticipantKey,
             @NonNull TextInputLayout nameInputLayout,
             @NonNull TextInputLayout priceInputLayout,
             @NonNull TextInputEditText nameInputView,
             @NonNull TextInputEditText priceInputView,
+            @NonNull TextInputEditText quantityInputView,
             @NonNull Runnable refreshReceiptDetails
     ) {
         String itemName = getText(nameInputView);
         String enteredPrice = getText(priceInputView);
+        int updatedQuantity = normalizeArchivedReceiptItemQuantity(quantityInputView);
 
         nameInputLayout.setError(null);
         priceInputLayout.setError(null);
@@ -2341,39 +3018,332 @@ public class ArchiveActivity extends AppCompatActivity {
             return;
         }
 
-        Integer updatedAmountCents = receiptParser.parseEnteredPriceToCents(enteredPrice);
-        if (updatedAmountCents == null) {
+        Integer updatedUnitAmountCents = receiptParser.parseEnteredPriceToCents(enteredPrice);
+        if (updatedUnitAmountCents == null) {
             return;
         }
 
         String normalizedSelectedPayerParticipantKey =
                 normalizeArchivedReceiptItemPayerKey(editState, selectedPayerParticipantKey);
         if (itemName.equals(originalName)
-                && updatedAmountCents == originalAmountCents
+                && updatedUnitAmountCents == originalUnitAmountCents
+                && updatedQuantity == originalQuantity
                 && originalPayerParticipantKey.equals(normalizedSelectedPayerParticipantKey)) {
             return;
         }
 
-        ReceiptHistoryStore.HistoryItem updatedItem = new ReceiptHistoryStore.HistoryItem(
+        ArrayList<ReceiptHistoryStore.HistoryItem> updatedItems = new ArrayList<>();
+        updatedItems.add(createArchivedReceiptHistoryItem(
                 itemName,
-                receiptParser.formatAmount(updatedAmountCents),
+                updatedUnitAmountCents,
+                updatedQuantity,
                 item.hasPaid,
                 normalizedSelectedPayerParticipantKey,
                 new ArrayList<>(item.selectedParticipantKeys)
-        );
-        replaceArchivedReceiptItem(editState, item, updatedItem);
+        ));
+        replaceArchivedReceiptItems(editState, sourceItems, updatedItems);
         refreshReceiptDetails.run();
     }
 
-    private void replaceArchivedReceiptItem(
+    private void replaceArchivedReceiptItems(
             @NonNull ArchivedReceiptEditState editState,
-            @NonNull ReceiptHistoryStore.HistoryItem originalItem,
-            @NonNull ReceiptHistoryStore.HistoryItem updatedItem
+            @NonNull List<ReceiptHistoryStore.HistoryItem> originalItems,
+            @NonNull List<ReceiptHistoryStore.HistoryItem> updatedItems
     ) {
-        int sourceIndex = editState.allItems.indexOf(originalItem);
-        if (sourceIndex >= 0) {
-            editState.allItems.set(sourceIndex, updatedItem);
+        if (originalItems.isEmpty()) {
+            return;
         }
+
+        int sourceIndex = editState.allItems.indexOf(originalItems.get(0));
+        if (sourceIndex < 0) {
+            return;
+        }
+
+        editState.allItems.removeAll(originalItems);
+        editState.allItems.addAll(sourceIndex, updatedItems);
+        rebuildArchivedReceiptVisibleItems(editState);
+    }
+
+    private void updateArchivedReceiptItemStructureButton(
+            @NonNull MaterialButton structureButton,
+            @NonNull ReceiptHistoryStore.HistoryItem item,
+            @NonNull ArchivedReceiptEditState editState,
+            @NonNull TextInputEditText nameInputView,
+            @NonNull TextInputEditText priceInputView,
+            @NonNull TextInputEditText quantityInputView,
+            @Nullable String selectedPayerParticipantKey
+    ) {
+        int quantity = Math.max(
+                MIN_RECEIPT_ITEM_QUANTITY,
+                parseArchivedReceiptItemQuantity(getText(quantityInputView))
+        );
+        if (quantity > 1) {
+            structureButton.setText(R.string.split);
+            structureButton.setIconResource(R.drawable.ic_edit_receipt_item_split);
+            structureButton.setEnabled(canApplyArchivedReceiptItemStructureAction(
+                    item,
+                    editState,
+                    nameInputView,
+                    priceInputView,
+                    quantityInputView,
+                    selectedPayerParticipantKey
+            ));
+            return;
+        }
+
+        structureButton.setText(R.string.combine);
+        structureButton.setIconResource(R.drawable.ic_edit_receipt_item_combine);
+        structureButton.setEnabled(canCombineArchivedReceiptItem(
+                item,
+                editState,
+                nameInputView,
+                priceInputView,
+                quantityInputView,
+                selectedPayerParticipantKey
+        ));
+    }
+
+    private boolean canApplyArchivedReceiptItemStructureAction(
+            @NonNull ReceiptHistoryStore.HistoryItem item,
+            @NonNull ArchivedReceiptEditState editState,
+            @NonNull TextInputEditText nameInputView,
+            @NonNull TextInputEditText priceInputView,
+            @NonNull TextInputEditText quantityInputView,
+            @Nullable String selectedPayerParticipantKey
+    ) {
+        return buildEditedArchivedReceiptItemFromInputs(
+                item,
+                editState,
+                null,
+                null,
+                nameInputView,
+                priceInputView,
+                quantityInputView,
+                selectedPayerParticipantKey
+        ) != null;
+    }
+
+    private boolean canCombineArchivedReceiptItem(
+            @NonNull ReceiptHistoryStore.HistoryItem item,
+            @NonNull ArchivedReceiptEditState editState,
+            @NonNull TextInputEditText nameInputView,
+            @NonNull TextInputEditText priceInputView,
+            @NonNull TextInputEditText quantityInputView,
+            @Nullable String selectedPayerParticipantKey
+    ) {
+        ReceiptHistoryStore.HistoryItem updatedItem = buildEditedArchivedReceiptItemFromInputs(
+                item,
+                editState,
+                null,
+                null,
+                nameInputView,
+                priceInputView,
+                quantityInputView,
+                selectedPayerParticipantKey
+        );
+        if (updatedItem == null || getArchivedReceiptItemQuantity(updatedItem) != MIN_RECEIPT_ITEM_QUANTITY) {
+            return false;
+        }
+        return !getArchivedReceiptItemsToCombine(item, updatedItem, editState).isEmpty();
+    }
+
+    private boolean applyArchivedReceiptItemStructureAction(
+            @NonNull ReceiptHistoryStore.HistoryItem item,
+            @NonNull ArchivedReceiptEditState editState,
+            @NonNull TextInputLayout nameInputLayout,
+            @NonNull TextInputLayout priceInputLayout,
+            @NonNull TextInputEditText nameInputView,
+            @NonNull TextInputEditText priceInputView,
+            @NonNull TextInputEditText quantityInputView,
+            @Nullable String selectedPayerParticipantKey,
+            @NonNull Runnable refreshReceiptDetails
+    ) {
+        ReceiptHistoryStore.HistoryItem updatedItem = buildEditedArchivedReceiptItemFromInputs(
+                item,
+                editState,
+                nameInputLayout,
+                priceInputLayout,
+                nameInputView,
+                priceInputView,
+                quantityInputView,
+                selectedPayerParticipantKey
+        );
+        if (updatedItem == null) {
+            return false;
+        }
+
+        if (getArchivedReceiptItemQuantity(updatedItem) > MIN_RECEIPT_ITEM_QUANTITY) {
+            splitArchivedReceiptItem(item, updatedItem, editState);
+            refreshReceiptDetails.run();
+            return true;
+        }
+
+        ArrayList<ReceiptHistoryStore.HistoryItem> itemsToCombine =
+                getArchivedReceiptItemsToCombine(item, updatedItem, editState);
+        if (itemsToCombine.isEmpty()) {
+            return false;
+        }
+
+        combineArchivedReceiptItems(item, updatedItem, itemsToCombine, editState);
+        refreshReceiptDetails.run();
+        return true;
+    }
+
+    @Nullable
+    private ReceiptHistoryStore.HistoryItem buildEditedArchivedReceiptItemFromInputs(
+            @NonNull ReceiptHistoryStore.HistoryItem originalItem,
+            @NonNull ArchivedReceiptEditState editState,
+            @Nullable TextInputLayout nameInputLayout,
+            @Nullable TextInputLayout priceInputLayout,
+            @NonNull TextInputEditText nameInputView,
+            @NonNull TextInputEditText priceInputView,
+            @NonNull TextInputEditText quantityInputView,
+            @Nullable String selectedPayerParticipantKey
+    ) {
+        if (nameInputLayout != null) {
+            nameInputLayout.setError(null);
+        }
+        if (priceInputLayout != null) {
+            priceInputLayout.setError(null);
+        }
+
+        String itemName = getText(nameInputView);
+        if (itemName.isEmpty()) {
+            if (nameInputLayout != null) {
+                nameInputLayout.setError(getString(R.string.receipt_item_name_required));
+            }
+            return null;
+        }
+
+        Integer updatedUnitAmountCents =
+                receiptParser.parseEnteredPriceToCents(getText(priceInputView));
+        if (updatedUnitAmountCents == null) {
+            if (priceInputLayout != null) {
+                priceInputLayout.setError(getString(R.string.invalid_receipt_price));
+            }
+            return null;
+        }
+
+        int updatedQuantity = Math.max(
+                MIN_RECEIPT_ITEM_QUANTITY,
+                parseArchivedReceiptItemQuantity(getText(quantityInputView))
+        );
+        return createArchivedReceiptHistoryItem(
+                itemName,
+                updatedUnitAmountCents,
+                updatedQuantity,
+                originalItem.hasPaid,
+                normalizeArchivedReceiptItemPayerKey(editState, selectedPayerParticipantKey),
+                new ArrayList<>(originalItem.selectedParticipantKeys)
+        );
+    }
+
+    @NonNull
+    private ArrayList<ReceiptHistoryStore.HistoryItem> getArchivedReceiptItemsToCombine(
+            @NonNull ReceiptHistoryStore.HistoryItem originalItem,
+            @NonNull ReceiptHistoryStore.HistoryItem updatedItem,
+            @NonNull ArchivedReceiptEditState editState
+    ) {
+        ArrayList<ReceiptHistoryStore.HistoryItem> itemsToCombine = new ArrayList<>();
+        for (ReceiptHistoryStore.HistoryItem candidateItem : editState.items) {
+            if (candidateItem == originalItem) {
+                continue;
+            }
+            if (areArchivedReceiptItemsCompatibleForCombine(updatedItem, candidateItem)) {
+                itemsToCombine.add(candidateItem);
+            }
+        }
+        return itemsToCombine;
+    }
+
+    private boolean areArchivedReceiptItemsCompatibleForCombine(
+            @NonNull ReceiptHistoryStore.HistoryItem anchorItem,
+            @NonNull ReceiptHistoryStore.HistoryItem candidateItem
+    ) {
+        if (!getArchivedReceiptItemCanonicalName(anchorItem.name).equalsIgnoreCase(
+                getArchivedReceiptItemCanonicalName(candidateItem.name)
+        )) {
+            return false;
+        }
+        if (getArchivedReceiptItemUnitAmountCents(anchorItem) != getArchivedReceiptItemUnitAmountCents(candidateItem)) {
+            return false;
+        }
+        if (!normalizeWhitespace(anchorItem.payerParticipantKey).equals(
+                normalizeWhitespace(candidateItem.payerParticipantKey)
+        )) {
+            return false;
+        }
+        if (anchorItem.hasPaid != candidateItem.hasPaid) {
+            return false;
+        }
+        return anchorItem.selectedParticipantKeys.equals(candidateItem.selectedParticipantKeys);
+    }
+
+    private void splitArchivedReceiptItem(
+            @NonNull ReceiptHistoryStore.HistoryItem originalItem,
+            @NonNull ReceiptHistoryStore.HistoryItem updatedItem,
+            @NonNull ArchivedReceiptEditState editState
+    ) {
+        int itemIndex = editState.allItems.indexOf(originalItem);
+        if (itemIndex < 0) {
+            return;
+        }
+
+        String canonicalName = getArchivedReceiptItemCanonicalName(updatedItem.name);
+        int quantity = getArchivedReceiptItemQuantity(updatedItem);
+        int unitAmountCents = getArchivedReceiptItemUnitAmountCents(updatedItem);
+        ArrayList<ReceiptHistoryStore.HistoryItem> splitItems = new ArrayList<>(quantity);
+        for (int index = 0; index < quantity; index++) {
+            splitItems.add(createArchivedReceiptHistoryItem(
+                    canonicalName,
+                    unitAmountCents,
+                    MIN_RECEIPT_ITEM_QUANTITY,
+                    updatedItem.hasPaid,
+                    updatedItem.payerParticipantKey,
+                    new ArrayList<>(updatedItem.selectedParticipantKeys)
+            ));
+        }
+
+        editState.allItems.remove(itemIndex);
+        editState.allItems.addAll(itemIndex, splitItems);
+        rebuildArchivedReceiptVisibleItems(editState);
+    }
+
+    private void combineArchivedReceiptItems(
+            @NonNull ReceiptHistoryStore.HistoryItem originalItem,
+            @NonNull ReceiptHistoryStore.HistoryItem updatedItem,
+            @NonNull List<ReceiptHistoryStore.HistoryItem> itemsToCombine,
+            @NonNull ArchivedReceiptEditState editState
+    ) {
+        int itemIndex = editState.allItems.indexOf(originalItem);
+        if (itemIndex < 0) {
+            return;
+        }
+
+        int combinedAmountCents = parseArchivedReceiptItemPriceToCents(updatedItem.price);
+        int combinedQuantity = getArchivedReceiptItemQuantity(updatedItem);
+        for (ReceiptHistoryStore.HistoryItem candidateItem : itemsToCombine) {
+            combinedAmountCents += parseArchivedReceiptItemPriceToCents(candidateItem.price);
+            combinedQuantity += getArchivedReceiptItemQuantity(candidateItem);
+        }
+
+        ReceiptHistoryStore.HistoryItem combinedItem = createArchivedReceiptHistoryItem(
+                updatedItem.name,
+                divideArchivedReceiptAmountCents(combinedAmountCents, combinedQuantity),
+                combinedQuantity,
+                updatedItem.hasPaid,
+                updatedItem.payerParticipantKey,
+                new ArrayList<>(updatedItem.selectedParticipantKeys)
+        );
+
+        editState.allItems.removeAll(itemsToCombine);
+        int refreshedIndex = editState.allItems.indexOf(originalItem);
+        if (refreshedIndex >= 0) {
+            editState.allItems.remove(refreshedIndex);
+        } else {
+            refreshedIndex = Math.min(itemIndex, editState.allItems.size());
+        }
+        editState.allItems.add(refreshedIndex, combinedItem);
         rebuildArchivedReceiptVisibleItems(editState);
     }
 
@@ -2395,6 +3365,8 @@ public class ArchiveActivity extends AppCompatActivity {
             @NonNull ArchivedReceiptEditState editState,
             @NonNull Runnable refreshReceiptDetails
     ) {
+        List<ReceiptHistoryStore.HistoryItem> sourceItems =
+                getArchivedReceiptVisibleSourceItems(editState, item);
         participantSelectionLayout.removeAllViews();
         if (participants.isEmpty()) {
             participantSelectionLayout.setVisibility(View.GONE);
@@ -2439,7 +3411,7 @@ public class ArchiveActivity extends AppCompatActivity {
             selectionButton.setMinimumWidth(0);
             selectionButton.setMinimumHeight(0);
             selectionButton.setPadding(0, 0, 0, 0);
-            selectionButton.setCornerRadius(dpToPx(10));
+            selectionButton.setCornerRadius(checkboxSize / 2);
             selectionButton.setStrokeWidth(dpToPx(2));
             applyArchivedReceiptParticipantBadgeTextStyle(selectionButton, participant, true);
             selectionButton.setBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));
@@ -2454,7 +3426,12 @@ public class ArchiveActivity extends AppCompatActivity {
                     item.isParticipantSelected(participant.key)
             );
             selectionButton.setOnClickListener(view -> {
-                toggleArchivedReceiptParticipantSelection(item, participant.key);
+                setArchivedReceiptParticipantSelection(
+                        sourceItems,
+                        item,
+                        participant.key,
+                        !item.isParticipantSelected(participant.key)
+                );
                 updateArchivedReceiptParticipantSelectionButtonStyle(
                         selectionButton,
                         participant,
@@ -2469,6 +3446,29 @@ public class ArchiveActivity extends AppCompatActivity {
         }
     }
 
+    private void setArchivedReceiptParticipantSelection(
+            @NonNull List<ReceiptHistoryStore.HistoryItem> sourceItems,
+            @NonNull ReceiptHistoryStore.HistoryItem visibleItem,
+            @NonNull String participantKey,
+            boolean selected
+    ) {
+        if (selected) {
+            visibleItem.selectedParticipantKeys.add(participantKey);
+        } else {
+            visibleItem.selectedParticipantKeys.remove(participantKey);
+        }
+
+        for (ReceiptHistoryStore.HistoryItem sourceItem : sourceItems) {
+            if (selected) {
+                if (!sourceItem.selectedParticipantKeys.contains(participantKey)) {
+                    sourceItem.selectedParticipantKeys.add(participantKey);
+                }
+            } else {
+                sourceItem.selectedParticipantKeys.remove(participantKey);
+            }
+        }
+    }
+
     private void showArchivedReceiptParticipantDetailsDialog(
             @NonNull ReceiptHistoryStore.ParticipantShare participant,
             @NonNull String receiptTotalAmount,
@@ -2479,6 +3479,8 @@ public class ArchiveActivity extends AppCompatActivity {
         TextView participantNameView = dialogView.findViewById(R.id.text_participant_detail_name);
         TextView participantPhoneView = dialogView.findViewById(R.id.text_participant_detail_phone);
         TextView participantTotalView = dialogView.findViewById(R.id.text_participant_detail_total);
+        TextView payerLabelView =
+                dialogView.findViewById(R.id.text_participant_detail_payer_label);
         AppCompatImageButton crownToggleButton =
                 dialogView.findViewById(R.id.button_participant_crown);
         MaterialButton removeParticipantButton =
@@ -2498,6 +3500,7 @@ public class ArchiveActivity extends AppCompatActivity {
                         receiptTotalAmount
                 )
         );
+        payerLabelView.setVisibility(View.VISIBLE);
         crownToggleButton.setVisibility(View.VISIBLE);
         crownToggleButton.setClickable(true);
         crownToggleButton.setFocusable(true);
@@ -2517,12 +3520,27 @@ public class ArchiveActivity extends AppCompatActivity {
             );
             refreshReceiptDetails.run();
         });
-        removeParticipantButton.setVisibility(View.GONE);
-        toggleParticipantItemsButton.setVisibility(View.GONE);
-
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setView(dialogView)
                 .create();
+        boolean canRemoveParticipant = !isDefaultParticipant(participant);
+        LinearLayout.LayoutParams removeButtonLayoutParams =
+                (LinearLayout.LayoutParams) removeParticipantButton.getLayoutParams();
+        removeButtonLayoutParams.setMarginEnd(0);
+        removeParticipantButton.setLayoutParams(removeButtonLayoutParams);
+        removeParticipantButton.setIconResource(R.drawable.ic_receipt_participant_remove);
+        removeParticipantButton.setIconTint(ColorStateList.valueOf(
+                removeParticipantButton.getCurrentTextColor()
+        ));
+        removeParticipantButton.setIconPadding(dpToPx(8));
+        removeParticipantButton.setEnabled(canRemoveParticipant);
+        if (canRemoveParticipant) {
+            removeParticipantButton.setOnClickListener(view -> {
+                removeArchivedReceiptParticipant(participant, editState, refreshReceiptDetails);
+                dialog.dismiss();
+            });
+        }
+        toggleParticipantItemsButton.setVisibility(View.GONE);
         dialog.show();
     }
 
@@ -3065,6 +4083,23 @@ public class ArchiveActivity extends AppCompatActivity {
         clearTextInputFocus(inputView, fallbackView);
     }
 
+    private void hideKeyboardForFocusedView(@NonNull View fallbackView) {
+        View focusedView = fallbackView.findFocus();
+        if (focusedView == null) {
+            return;
+        }
+
+        fallbackView.requestFocus();
+
+        InputMethodManager inputMethodManager =
+                ContextCompat.getSystemService(this, InputMethodManager.class);
+        if (inputMethodManager != null) {
+            inputMethodManager.hideSoftInputFromWindow(focusedView.getWindowToken(), 0);
+        }
+
+        focusedView.clearFocus();
+    }
+
     private void clearTextInputFocus(
             @Nullable TextInputEditText inputView,
             @Nullable View fallbackView
@@ -3604,6 +4639,25 @@ public class ArchiveActivity extends AppCompatActivity {
         return disabledReasons;
     }
 
+    @NonNull
+    private ArrayList<String> buildArchivedReceiptSummaryDisabledReasons(
+            @NonNull ArchivedReceiptEditState editState
+    ) {
+        ArrayList<String> disabledReasons = new ArrayList<>();
+        if (editState.allItems.isEmpty()) {
+            disabledReasons.add(getString(R.string.next_disabled_reason_no_items));
+        }
+        if (editState.participants.size() <= 1) {
+            disabledReasons.add(getString(R.string.next_disabled_reason_not_enough_participants));
+        }
+        if (!hasArchivedReceiptSelections(editState)) {
+            disabledReasons.add(
+                    getString(R.string.next_disabled_reason_missing_participant_selection)
+            );
+        }
+        return disabledReasons;
+    }
+
     private void showArchivedReceiptSaveChangesDisabledReasonsPopup(
             @NonNull MaterialButton saveChangesButton,
             @NonNull ArrayList<String> disabledReasons
@@ -3623,7 +4677,7 @@ public class ArchiveActivity extends AppCompatActivity {
         );
         TextView titleView = popupView.findViewById(R.id.text_next_disabled_title);
         LinearLayout reasonsLayout = popupView.findViewById(R.id.layout_next_disabled_reasons);
-        titleView.setText(R.string.save_changes_disabled_reasons);
+        titleView.setText(R.string.next_disabled_reasons);
 
         for (int index = 0; index < disabledReasons.size(); index++) {
             TextView reasonView = new TextView(this);
@@ -3675,6 +4729,110 @@ public class ArchiveActivity extends AppCompatActivity {
         archivedReceiptSaveChangesDisabledReasonsPopup = null;
     }
 
+    private void bindArchiveReceiptIncompleteStatusIcon(
+            @NonNull View itemView,
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            boolean insideFolder
+    ) {
+        AppCompatImageView statusIconView = itemView.findViewById(R.id.image_history_receipt_status);
+        if (statusIconView == null) {
+            return;
+        }
+
+        boolean summaryDisabled = isArchivedReceiptSummaryDisabled(entry);
+        if (!summaryDisabled) {
+            statusIconView.setVisibility(View.GONE);
+            statusIconView.setOnClickListener(null);
+            statusIconView.setClickable(false);
+            statusIconView.setFocusable(false);
+            return;
+        }
+
+        statusIconView.setVisibility(View.VISIBLE);
+        statusIconView.setImageResource(R.drawable.ic_warning_outline);
+        statusIconView.setImageTintList(ColorStateList.valueOf(
+                resolveThemeColor(
+                        com.google.android.material.R.attr.colorOnSurfaceVariant,
+                        Color.GRAY
+                )
+        ));
+        statusIconView.setContentDescription(getString(
+                insideFolder
+                        ? R.string.archive_receipt_incomplete_folder
+                        : R.string.archive_receipt_incomplete
+        ));
+        ViewGroup.LayoutParams layoutParams = statusIconView.getLayoutParams();
+        if (layoutParams instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams frameLayoutParams =
+                    (FrameLayout.LayoutParams) layoutParams;
+            frameLayoutParams.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+            frameLayoutParams.topMargin = 0;
+            frameLayoutParams.bottomMargin = 0;
+            frameLayoutParams.setMarginEnd(dpToPx(12));
+            statusIconView.setLayoutParams(frameLayoutParams);
+        }
+        statusIconView.setClickable(true);
+        statusIconView.setFocusable(true);
+        statusIconView.setOnClickListener(
+                view -> showArchiveReceiptIncompletePopup(view, insideFolder)
+        );
+    }
+
+    private void showArchiveReceiptIncompletePopup(
+            @NonNull View anchorView,
+            boolean insideFolder
+    ) {
+        if (archiveReceiptIncompletePopup != null && archiveReceiptIncompletePopup.isShowing()) {
+            archiveReceiptIncompletePopup.dismiss();
+        }
+
+        View popupView = getLayoutInflater().inflate(
+                R.layout.popup_header_help_message,
+                null
+        );
+        TextView messageView = popupView.findViewById(R.id.text_header_help_message);
+        messageView.setText(
+                insideFolder
+                        ? R.string.archive_receipt_incomplete_folder
+                        : R.string.archive_receipt_incomplete
+        );
+
+        popupView.measure(
+                View.MeasureSpec.makeMeasureSpec(dpToPx(240), View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        );
+
+        PopupWindow popupWindow = new PopupWindow(
+                popupView,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                true
+        );
+        popupWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        popupWindow.setOutsideTouchable(true);
+        popupWindow.setElevation(dpToPx(10));
+        popupWindow.setOnDismissListener(() -> {
+            if (archiveReceiptIncompletePopup == popupWindow) {
+                archiveReceiptIncompletePopup = null;
+            }
+        });
+
+        int popupWidth = popupView.getMeasuredWidth();
+        int popupHeight = popupView.getMeasuredHeight();
+        int xOffset = anchorView.getWidth() - popupWidth;
+        int yOffset = -(anchorView.getHeight() + popupHeight + dpToPx(8));
+        popupWindow.showAsDropDown(anchorView, xOffset, yOffset);
+        archiveReceiptIncompletePopup = popupWindow;
+    }
+
+    private void dismissArchiveReceiptIncompletePopup() {
+        if (archiveReceiptIncompletePopup == null) {
+            return;
+        }
+        archiveReceiptIncompletePopup.dismiss();
+        archiveReceiptIncompletePopup = null;
+    }
+
     @NonNull
     private BigDecimal computeArchivedReceiptItemsTotal(
             @NonNull ArchivedReceiptEditState editState
@@ -3693,6 +4851,9 @@ public class ArchiveActivity extends AppCompatActivity {
     ) {
         boolean isSelected = isCrownedParticipant(participant, editState);
         crownButton.setImageResource(isSelected ? R.drawable.crown_true : R.drawable.crown_false);
+        crownButton.setImageTintList(ColorStateList.valueOf(
+                resolveThemeColor(android.R.attr.textColorPrimary, Color.BLACK)
+        ));
         crownButton.setContentDescription(
                 getString(
                         isSelected
@@ -3735,6 +4896,14 @@ public class ArchiveActivity extends AppCompatActivity {
             }
         }
         return true;
+    }
+
+    private boolean isArchivedReceiptSummaryDisabled(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry
+    ) {
+        return !buildArchivedReceiptSummaryDisabledReasons(
+                createArchivedReceiptEditState(entry)
+        ).isEmpty();
     }
 
     @NonNull
@@ -3876,6 +5045,185 @@ public class ArchiveActivity extends AppCompatActivity {
                 .replace('.', ',') + "kr";
     }
 
+    private void toggleArchiveTree(@NonNull ArchiveRootItem rootItem, @NonNull View itemView) {
+        ArchiveStore.Archive archive = rootItem.archive;
+        if (archive == null) {
+            return;
+        }
+
+        boolean expanded = expandedArchiveNames.contains(archive.name);
+        if (expanded) {
+            expandedArchiveNames.remove(archive.name);
+        } else {
+            expandedArchiveNames.add(archive.name);
+        }
+        bindArchiveTreeState(itemView, rootItem, !expanded, true);
+    }
+
+    private void bindArchiveTreeState(
+            @NonNull View itemView,
+            @NonNull ArchiveRootItem rootItem,
+            boolean expanded,
+            boolean animate
+    ) {
+        MaterialCardView treeCard = itemView.findViewById(R.id.card_archive_entry_tree);
+        LinearLayout receiptsLayout = itemView.findViewById(R.id.layout_archive_entry_tree_receipts);
+        TextView emptyView = itemView.findViewById(R.id.text_archive_entry_tree_empty);
+        MaterialButton summaryButton = itemView.findViewById(R.id.button_archive_entry_summary);
+        AppCompatImageView chevronView = itemView.findViewById(R.id.image_archive_entry_chevron);
+
+        if (treeCard != null
+                && receiptsLayout != null
+                && emptyView != null
+                && summaryButton != null
+                && rootItem.archive != null) {
+            if (expanded) {
+                bindInlineArchiveReceiptViews(
+                        receiptsLayout,
+                        emptyView,
+                        summaryButton,
+                        rootItem.sourceIndex,
+                        rootItem.archive.name,
+                        rootItem.archive.receipts
+                );
+                treeCard.setVisibility(View.VISIBLE);
+            } else {
+                treeCard.setVisibility(View.GONE);
+            }
+        }
+
+        if (chevronView == null) {
+            return;
+        }
+
+        chevronView.animate().cancel();
+        if (animate) {
+            chevronView.animate()
+                    .rotation(expanded ? ARCHIVE_TREE_EXPANDED_ROTATION_DEGREES : 0f)
+                    .setDuration(ARCHIVE_TREE_TOGGLE_DURATION_MS)
+                    .start();
+        } else {
+            chevronView.setRotation(expanded ? ARCHIVE_TREE_EXPANDED_ROTATION_DEGREES : 0f);
+        }
+    }
+
+    private void bindInlineArchiveReceiptViews(
+            @NonNull LinearLayout receiptsLayout,
+            @NonNull TextView emptyView,
+            @NonNull MaterialButton summaryButton,
+            int archiveIndex,
+            @NonNull String archiveName,
+            @NonNull ArrayList<ReceiptHistoryStore.HistoryEntry> archiveReceipts
+    ) {
+        receiptsLayout.removeAllViews();
+        if (archiveReceipts.isEmpty()) {
+            receiptsLayout.setVisibility(View.GONE);
+            emptyView.setVisibility(View.VISIBLE);
+            summaryButton.setVisibility(View.GONE);
+            return;
+        }
+
+        receiptsLayout.setVisibility(View.VISIBLE);
+        emptyView.setVisibility(View.GONE);
+        summaryButton.setVisibility(View.VISIBLE);
+        summaryButton.setOnClickListener(
+                view -> showArchiveSummaryDialog(archiveName, archiveReceipts)
+        );
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (int index = 0; index < archiveReceipts.size(); index++) {
+            ReceiptHistoryStore.HistoryEntry entry = archiveReceipts.get(index);
+            View rowView = inflater.inflate(R.layout.item_history_receipt, receiptsLayout, false);
+            ViewGroup.LayoutParams layoutParams = rowView.getLayoutParams();
+            if (layoutParams instanceof ViewGroup.MarginLayoutParams) {
+                ViewGroup.MarginLayoutParams marginLayoutParams =
+                        (ViewGroup.MarginLayoutParams) layoutParams;
+                int compactVerticalMargin = dpToPx(8);
+                marginLayoutParams.topMargin = compactVerticalMargin;
+                marginLayoutParams.bottomMargin = compactVerticalMargin;
+                rowView.setLayoutParams(marginLayoutParams);
+            }
+            TextView receiptNameView = rowView.findViewById(R.id.text_history_receipt_name);
+            TextView totalAmountView = rowView.findViewById(R.id.text_history_receipt_total);
+
+            receiptNameView.setText(entry.receiptName);
+            totalAmountView.setText(
+                    getString(R.string.archive_summary_transfer_amount, entry.totalAmount)
+            );
+            bindArchiveReceiptIncompleteStatusIcon(rowView, entry, true);
+
+            final int receiptIndex = index;
+            rowView.setClickable(true);
+            rowView.setFocusable(true);
+            rowView.setOnClickListener(view -> {
+                dismissArchiveReceiptIncompletePopup();
+                if (receiptIndex < 0 || receiptIndex >= archiveReceipts.size()) {
+                    return;
+                }
+
+                showArchivedReceiptDetailsDialog(
+                        archiveIndex,
+                        receiptIndex,
+                        archiveReceipts,
+                        archiveReceipts.get(receiptIndex),
+                        this::loadArchiveNames
+                );
+            });
+            rowView.setOnTouchListener(new View.OnTouchListener() {
+                private final int touchSlop = ViewConfiguration
+                        .get(ArchiveActivity.this)
+                        .getScaledTouchSlop();
+                private float downX;
+                private float downY;
+                private float downRawX;
+                private float downRawY;
+                private boolean longPressTriggered;
+                private final Runnable longPressRunnable = () -> {
+                    longPressTriggered = true;
+                    vibrateForArchiveLongPress();
+                    showArchiveReceiptActionsMenu(
+                            rowView,
+                            downRawX,
+                            downRawY,
+                            archiveIndex,
+                            receiptIndex,
+                            archiveReceipts,
+                            ArchiveActivity.this::loadArchiveNames
+                    );
+                };
+
+                @Override
+                public boolean onTouch(View view, MotionEvent event) {
+                    switch (event.getActionMasked()) {
+                        case MotionEvent.ACTION_DOWN:
+                            downX = event.getX();
+                            downY = event.getY();
+                            downRawX = event.getRawX();
+                            downRawY = event.getRawY();
+                            longPressTriggered = false;
+                            view.postDelayed(
+                                    longPressRunnable,
+                                    ARCHIVE_ENTRY_LONG_PRESS_DURATION_MS
+                            );
+                            return false;
+                        case MotionEvent.ACTION_MOVE:
+                            if (Math.abs(event.getX() - downX) > touchSlop
+                                    || Math.abs(event.getY() - downY) > touchSlop) {
+                                view.removeCallbacks(longPressRunnable);
+                            }
+                            return false;
+                        case MotionEvent.ACTION_UP:
+                        case MotionEvent.ACTION_CANCEL:
+                            view.removeCallbacks(longPressRunnable);
+                            return longPressTriggered;
+                        default:
+                            return false;
+                    }
+                }
+            });
+            receiptsLayout.addView(rowView);
+        }
+    }
+
     private void showArchiveEntryActionsMenu(
             @NonNull View anchorView,
             float rawTouchX,
@@ -3918,6 +5266,60 @@ public class ArchiveActivity extends AppCompatActivity {
         confirmationDialog.show();
     }
 
+    private void showStandaloneReceiptActionsMenu(
+            @NonNull View anchorView,
+            float rawTouchX,
+            float rawTouchY,
+            int receiptIndex
+    ) {
+        AnchoredDropdownMenuHelper.showActionMenu(
+                anchorView,
+                rawTouchX,
+                rawTouchY,
+                Arrays.asList(
+                        new AnchoredDropdownMenuHelper.ActionItem(
+                                R.string.remove,
+                                R.drawable.ic_history_remove,
+                                () -> showRemoveStandaloneReceiptDialog(receiptIndex)
+                        ),
+                        new AnchoredDropdownMenuHelper.ActionItem(
+                                R.string.move,
+                                R.drawable.ic_archive_move,
+                                () -> showMoveStandaloneReceiptDialog(receiptIndex)
+                        )
+                )
+        );
+    }
+
+    private void showRemoveStandaloneReceiptDialog(int receiptIndex) {
+        if (receiptIndex < 0 || receiptIndex >= standaloneReceipts.size()) {
+            return;
+        }
+
+        View dialogView = getLayoutInflater().inflate(
+                R.layout.dialog_archive_remove_confirmation,
+                null
+        );
+        TextView titleView = dialogView.findViewById(R.id.text_archive_remove_confirmation_title);
+        MaterialButton noButton = dialogView.findViewById(R.id.button_archive_remove_no);
+        MaterialButton yesButton = dialogView.findViewById(R.id.button_archive_remove_yes);
+
+        titleView.setText(R.string.remove_receipt_confirmation_title);
+
+        AlertDialog confirmationDialog = new MaterialAlertDialogBuilder(this)
+                .setView(dialogView)
+                .create();
+
+        noButton.setOnClickListener(view -> confirmationDialog.dismiss());
+        yesButton.setOnClickListener(view -> {
+            confirmationDialog.dismiss();
+            ArchiveStore.removeStandaloneReceiptAt(this, receiptIndex);
+            loadArchiveNames();
+        });
+
+        confirmationDialog.show();
+    }
+
     private void showArchiveReceiptActionsMenu(
             @NonNull View anchorView,
             float rawTouchX,
@@ -3925,7 +5327,7 @@ public class ArchiveActivity extends AppCompatActivity {
             int archiveIndex,
             int receiptIndex,
             @NonNull ArrayList<ReceiptHistoryStore.HistoryEntry> archiveReceipts,
-            @NonNull ArchiveReceiptEntriesAdapter adapter
+            @NonNull Runnable onReceiptsChanged
     ) {
         AnchoredDropdownMenuHelper.showActionMenu(
                 anchorView,
@@ -3939,7 +5341,7 @@ public class ArchiveActivity extends AppCompatActivity {
                                         archiveIndex,
                                         receiptIndex,
                                         archiveReceipts,
-                                        adapter
+                                        onReceiptsChanged
                                 )
                         ),
                         new AnchoredDropdownMenuHelper.ActionItem(
@@ -3949,7 +5351,7 @@ public class ArchiveActivity extends AppCompatActivity {
                                         archiveIndex,
                                         receiptIndex,
                                         archiveReceipts,
-                                        adapter
+                                        onReceiptsChanged
                                 )
                         )
                 )
@@ -3960,7 +5362,7 @@ public class ArchiveActivity extends AppCompatActivity {
             int archiveIndex,
             int receiptIndex,
             @NonNull ArrayList<ReceiptHistoryStore.HistoryEntry> archiveReceipts,
-            @NonNull ArchiveReceiptEntriesAdapter adapter
+            @NonNull Runnable onReceiptsChanged
     ) {
         if (receiptIndex < 0 || receiptIndex >= archiveReceipts.size()) {
             return;
@@ -3968,77 +5370,77 @@ public class ArchiveActivity extends AppCompatActivity {
 
         ArchiveStore.removeReceiptAt(this, archiveIndex, receiptIndex);
         archiveReceipts.remove(receiptIndex);
-        loadArchiveNames();
-        adapter.notifyDataSetChanged();
+        onReceiptsChanged.run();
     }
 
     private void showMoveArchiveReceiptDialog(
             int sourceArchiveIndex,
             int receiptIndex,
             @NonNull ArrayList<ReceiptHistoryStore.HistoryEntry> archiveReceipts,
-            @NonNull ArchiveReceiptEntriesAdapter adapter
+            @NonNull Runnable onReceiptsChanged
     ) {
         if (receiptIndex < 0 || receiptIndex >= archiveReceipts.size()) {
             return;
         }
 
-        ArrayList<ArchiveStore.Archive> allArchives = ArchiveStore.loadArchives(this);
-        ArrayList<String> destinationArchiveNames = new ArrayList<>();
-        ArrayList<Integer> destinationArchiveIndexes = new ArrayList<>();
+        ArrayList<String> locationNames = new ArrayList<>();
         final int[] currentSourceArchiveIndex = {sourceArchiveIndex};
+        final int[] selectedArchiveIndex = {sourceArchiveIndex};
 
-        View dialogView = getLayoutInflater().inflate(R.layout.dialog_select_archive, null);
+        View dialogView = getLayoutInflater().inflate(
+                R.layout.dialog_select_archive_location,
+                null
+        );
         View headerView = getLayoutInflater().inflate(
                 R.layout.dialog_select_archive_header,
                 null
         );
+        TextView headerTitleView = headerView.findViewById(R.id.text_select_archive_header_title);
         AppCompatImageButton addArchiveButton =
                 headerView.findViewById(R.id.button_select_archive_add);
-        ListView archivesListView = dialogView.findViewById(R.id.list_select_archive);
-        TextView emptyView = dialogView.findViewById(R.id.text_select_archive_empty);
-        MaterialButton moveButton = dialogView.findViewById(R.id.button_add_selected_archive);
+        ListView archivesListView = dialogView.findViewById(R.id.list_select_archive_location);
+        TextView emptyView = dialogView.findViewById(R.id.text_select_archive_location_empty);
+        TextInputLayout receiptNameInputLayout =
+                dialogView.findViewById(R.id.input_layout_select_archive_receipt_name);
+        MaterialButton moveButton = dialogView.findViewById(R.id.button_create_selected_receipt);
         ArrayAdapter<String> archivesAdapter = new ArrayAdapter<>(
                 this,
                 android.R.layout.simple_list_item_single_choice,
-                destinationArchiveNames
+                locationNames
         );
+
+        headerTitleView.setText(R.string.select_location_title);
+        receiptNameInputLayout.setVisibility(View.GONE);
         archivesListView.setAdapter(archivesAdapter);
         archivesListView.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
         moveButton.setText(R.string.move);
 
-        final int[] selectedDestinationIndex = {-1};
+        Runnable updateMoveButtonState = () ->
+                moveButton.setEnabled(selectedArchiveIndex[0] != currentSourceArchiveIndex[0]);
         Runnable refreshDestinations = () -> {
-            destinationArchiveNames.clear();
-            destinationArchiveIndexes.clear();
+            locationNames.clear();
+            locationNames.add(getString(R.string.standalone));
 
             ArrayList<ArchiveStore.Archive> refreshedArchives = ArchiveStore.loadArchives(this);
             for (int index = 0; index < refreshedArchives.size(); index++) {
-                if (index == currentSourceArchiveIndex[0]) {
-                    continue;
-                }
-                destinationArchiveNames.add(refreshedArchives.get(index).name);
-                destinationArchiveIndexes.add(index);
+                locationNames.add(refreshedArchives.get(index).name);
             }
 
             archivesAdapter.notifyDataSetChanged();
             archivesListView.clearChoices();
-            selectedDestinationIndex[0] = -1;
-            moveButton.setEnabled(false);
-
-            if (destinationArchiveNames.isEmpty()) {
-                archivesListView.setVisibility(View.GONE);
-                emptyView.setVisibility(View.VISIBLE);
-                emptyView.setText(R.string.move_archive_empty);
-            } else {
-                archivesListView.setVisibility(View.VISIBLE);
-                emptyView.setVisibility(View.GONE);
-            }
+            int checkedPosition = selectedArchiveIndex[0] < 0
+                    ? 0
+                    : Math.min(selectedArchiveIndex[0] + 1, locationNames.size() - 1);
+            archivesListView.setItemChecked(checkedPosition, true);
+            archivesListView.setVisibility(View.VISIBLE);
+            emptyView.setVisibility(View.GONE);
+            updateMoveButtonState.run();
         };
         refreshDestinations.run();
 
         archivesListView.setOnItemClickListener((parent, view, position, id) -> {
-            selectedDestinationIndex[0] = position;
-            moveButton.setEnabled(true);
+            selectedArchiveIndex[0] = position == 0 ? -1 : position - 1;
+            updateMoveButtonState.run();
         });
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
@@ -4048,32 +5450,121 @@ public class ArchiveActivity extends AppCompatActivity {
 
         addArchiveButton.setOnClickListener(view -> showNewArchiveDialog(() -> {
             currentSourceArchiveIndex[0] += 1;
-            refreshDestinations.run();
-            if (!destinationArchiveNames.isEmpty()) {
-                selectedDestinationIndex[0] = 0;
-                archivesListView.setItemChecked(0, true);
-                moveButton.setEnabled(true);
+            if (selectedArchiveIndex[0] >= 0) {
+                selectedArchiveIndex[0] += 1;
             }
+            refreshDestinations.run();
         }));
 
-        moveButton.setEnabled(false);
+        updateMoveButtonState.run();
         moveButton.setOnClickListener(view -> {
-            if (selectedDestinationIndex[0] < 0) {
-                moveButton.setEnabled(false);
+            if (selectedArchiveIndex[0] == currentSourceArchiveIndex[0]) {
+                updateMoveButtonState.run();
                 return;
             }
 
-            ArchiveStore.moveReceiptToArchive(
-                    this,
-                    currentSourceArchiveIndex[0],
-                    receiptIndex,
-                    destinationArchiveIndexes.get(selectedDestinationIndex[0])
-            );
+            if (selectedArchiveIndex[0] < 0) {
+                ArchiveStore.moveReceiptToStandalone(
+                        this,
+                        currentSourceArchiveIndex[0],
+                        receiptIndex
+                );
+            } else {
+                ArchiveStore.moveReceiptToArchive(
+                        this,
+                        currentSourceArchiveIndex[0],
+                        receiptIndex,
+                        selectedArchiveIndex[0]
+                );
+            }
             archiveReceipts.remove(receiptIndex);
-            loadArchiveNames();
-            adapter.notifyDataSetChanged();
+            onReceiptsChanged.run();
             dialog.dismiss();
-            Toast.makeText(this, R.string.receipt_moved_to_archive, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.receipt_moved, Toast.LENGTH_SHORT).show();
+        });
+
+        dialog.show();
+    }
+
+    private void showMoveStandaloneReceiptDialog(int receiptIndex) {
+        if (receiptIndex < 0 || receiptIndex >= standaloneReceipts.size()) {
+            return;
+        }
+
+        ArrayList<String> locationNames = new ArrayList<>();
+        final int[] selectedArchiveIndex = {-1};
+
+        View dialogView = getLayoutInflater().inflate(
+                R.layout.dialog_select_archive_location,
+                null
+        );
+        View headerView = getLayoutInflater().inflate(
+                R.layout.dialog_select_archive_header,
+                null
+        );
+        TextView headerTitleView = headerView.findViewById(R.id.text_select_archive_header_title);
+        AppCompatImageButton addArchiveButton =
+                headerView.findViewById(R.id.button_select_archive_add);
+        ListView archivesListView = dialogView.findViewById(R.id.list_select_archive_location);
+        TextView emptyView = dialogView.findViewById(R.id.text_select_archive_location_empty);
+        TextInputLayout receiptNameInputLayout =
+                dialogView.findViewById(R.id.input_layout_select_archive_receipt_name);
+        MaterialButton moveButton = dialogView.findViewById(R.id.button_create_selected_receipt);
+        ArrayAdapter<String> archivesAdapter = new ArrayAdapter<>(
+                this,
+                android.R.layout.simple_list_item_single_choice,
+                locationNames
+        );
+
+        headerTitleView.setText(R.string.select_location_title);
+        receiptNameInputLayout.setVisibility(View.GONE);
+        archivesListView.setAdapter(archivesAdapter);
+        archivesListView.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
+        moveButton.setText(R.string.move);
+
+        Runnable updateMoveButtonState = () -> moveButton.setEnabled(selectedArchiveIndex[0] >= 0);
+        Runnable refreshDestinations = () -> {
+            locationNames.clear();
+            locationNames.add(getString(R.string.standalone));
+            locationNames.addAll(ArchiveStore.loadArchiveNames(this));
+            archivesAdapter.notifyDataSetChanged();
+            archivesListView.clearChoices();
+            int checkedPosition = selectedArchiveIndex[0] < 0
+                    ? 0
+                    : Math.min(selectedArchiveIndex[0] + 1, locationNames.size() - 1);
+            archivesListView.setItemChecked(checkedPosition, true);
+            archivesListView.setVisibility(View.VISIBLE);
+            emptyView.setVisibility(View.GONE);
+            updateMoveButtonState.run();
+        };
+        refreshDestinations.run();
+
+        archivesListView.setOnItemClickListener((parent, view, position, id) -> {
+            selectedArchiveIndex[0] = position == 0 ? -1 : position - 1;
+            updateMoveButtonState.run();
+        });
+
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setCustomTitle(headerView)
+                .setView(dialogView)
+                .create();
+
+        addArchiveButton.setOnClickListener(view -> showNewArchiveDialog(() -> {
+            selectedArchiveIndex[0] = 0;
+            refreshDestinations.run();
+        }));
+
+        updateMoveButtonState.run();
+        moveButton.setOnClickListener(view -> {
+            if (selectedArchiveIndex[0] < 0) {
+                updateMoveButtonState.run();
+                return;
+            }
+
+            ArchiveStore.moveStandaloneReceiptToArchive(this, receiptIndex, selectedArchiveIndex[0]);
+            dialog.dismiss();
+            expandArchiveByIndex(selectedArchiveIndex[0]);
+            Toast.makeText(this, R.string.receipt_moved, Toast.LENGTH_SHORT).show();
         });
 
         dialog.show();
@@ -4107,33 +5598,75 @@ public class ArchiveActivity extends AppCompatActivity {
         }
     }
 
-    private final class ArchiveEntriesAdapter extends ArrayAdapter<String> {
+    private final class ArchiveEntriesAdapter extends BaseAdapter {
         private ArchiveEntriesAdapter() {
-            super(ArchiveActivity.this, R.layout.item_archive_entry, archiveNames);
+        }
+
+        @Override
+        public int getCount() {
+            return archiveRootItems.size();
+        }
+
+        @NonNull
+        @Override
+        public ArchiveRootItem getItem(int position) {
+            return archiveRootItems.get(position);
+        }
+
+        @Override
+        public long getItemId(int position) {
+            return position;
+        }
+
+        @Override
+        public int getViewTypeCount() {
+            return 2;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            return getItem(position).type;
         }
 
         @NonNull
         @Override
         public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
+            ArchiveRootItem rootItem = getItem(position);
+            if (rootItem.type == ArchiveRootItem.TYPE_STANDALONE_RECEIPT) {
+                return getStandaloneReceiptView(rootItem, convertView, parent);
+            }
+            return getArchiveView(rootItem, convertView, parent);
+        }
+
+        @NonNull
+        private View getArchiveView(
+                @NonNull ArchiveRootItem rootItem,
+                @Nullable View convertView,
+                @NonNull ViewGroup parent
+        ) {
             View itemView = convertView;
             if (itemView == null) {
-                itemView = LayoutInflater.from(getContext())
+                itemView = LayoutInflater.from(ArchiveActivity.this)
                         .inflate(R.layout.item_archive_entry, parent, false);
             }
 
             TextView archiveNameView = itemView.findViewById(R.id.text_archive_name);
             TextView archiveTotalView = itemView.findViewById(R.id.text_archive_total);
-            String archiveName = getItem(position);
-            ArchiveStore.Archive archive = ArchiveStore.loadArchiveAt(ArchiveActivity.this, position);
-            archiveNameView.setText(archiveName == null ? "" : archiveName);
+            View headerView = itemView.findViewById(R.id.layout_archive_entry_header);
+            ArchiveStore.Archive archive = rootItem.archive;
+            archiveNameView.setText(archive == null ? "" : archive.name);
             archiveTotalView.setText(formatArchiveTotalAmount(archive));
 
-            final View archiveItemView = itemView;
-            final int archiveIndex = position;
-            itemView.setClickable(true);
-            itemView.setFocusable(true);
-            itemView.setOnClickListener(view -> showArchiveDetailsDialog(archiveIndex));
-            itemView.setOnTouchListener(new View.OnTouchListener() {
+            boolean expanded = archive != null && expandedArchiveNames.contains(archive.name);
+            bindArchiveTreeState(itemView, rootItem, expanded, false);
+
+            final View archiveRowView = itemView;
+            final View archiveHeaderView = headerView == null ? archiveRowView : headerView;
+            final int archiveIndex = rootItem.sourceIndex;
+            archiveHeaderView.setClickable(true);
+            archiveHeaderView.setFocusable(true);
+            archiveHeaderView.setOnClickListener(view -> toggleArchiveTree(rootItem, archiveRowView));
+            archiveHeaderView.setOnTouchListener(new View.OnTouchListener() {
                 private final int touchSlop = ViewConfiguration
                         .get(ArchiveActivity.this)
                         .getScaledTouchSlop();
@@ -4146,10 +5679,103 @@ public class ArchiveActivity extends AppCompatActivity {
                     longPressTriggered = true;
                     vibrateForArchiveLongPress();
                     showArchiveEntryActionsMenu(
-                            archiveItemView,
+                            archiveHeaderView,
                             downRawX,
                             downRawY,
                             archiveIndex
+                    );
+                };
+
+                @Override
+                public boolean onTouch(View view, MotionEvent event) {
+                    switch (event.getActionMasked()) {
+                        case MotionEvent.ACTION_DOWN:
+                            downX = event.getX();
+                            downY = event.getY();
+                            downRawX = event.getRawX();
+                            downRawY = event.getRawY();
+                            longPressTriggered = false;
+                            view.postDelayed(
+                                    longPressRunnable,
+                                    ARCHIVE_ENTRY_LONG_PRESS_DURATION_MS
+                            );
+                            return false;
+                        case MotionEvent.ACTION_MOVE:
+                            if (Math.abs(event.getX() - downX) > touchSlop
+                                    || Math.abs(event.getY() - downY) > touchSlop) {
+                                view.removeCallbacks(longPressRunnable);
+                            }
+                            return false;
+                        case MotionEvent.ACTION_UP:
+                        case MotionEvent.ACTION_CANCEL:
+                            view.removeCallbacks(longPressRunnable);
+                            return longPressTriggered;
+                        default:
+                            return false;
+                    }
+                }
+            });
+            return itemView;
+        }
+
+        @NonNull
+        private View getStandaloneReceiptView(
+                @NonNull ArchiveRootItem rootItem,
+                @Nullable View convertView,
+                @NonNull ViewGroup parent
+        ) {
+            View itemView = convertView;
+            if (itemView == null) {
+                itemView = LayoutInflater.from(ArchiveActivity.this)
+                        .inflate(R.layout.item_history_receipt, parent, false);
+            }
+
+            ReceiptHistoryStore.HistoryEntry receiptEntry = rootItem.receiptEntry;
+            TextView receiptNameView = itemView.findViewById(R.id.text_history_receipt_name);
+            TextView totalAmountView = itemView.findViewById(R.id.text_history_receipt_total);
+
+            receiptNameView.setText(receiptEntry == null ? "" : receiptEntry.receiptName);
+            totalAmountView.setText(receiptEntry == null
+                    ? ""
+                    : getString(R.string.archive_summary_transfer_amount, receiptEntry.totalAmount));
+            if (receiptEntry != null) {
+                bindArchiveReceiptIncompleteStatusIcon(itemView, receiptEntry, false);
+            } else {
+                AppCompatImageView statusIconView =
+                        itemView.findViewById(R.id.image_history_receipt_status);
+                if (statusIconView != null) {
+                    statusIconView.setVisibility(View.GONE);
+                    statusIconView.setOnClickListener(null);
+                    statusIconView.setClickable(false);
+                    statusIconView.setFocusable(false);
+                }
+            }
+
+            final View receiptItemView = itemView;
+            final int receiptIndex = rootItem.sourceIndex;
+            itemView.setClickable(true);
+            itemView.setFocusable(true);
+            itemView.setOnClickListener(view -> {
+                dismissArchiveReceiptIncompletePopup();
+                showStandaloneReceiptDetailsDialog(receiptIndex);
+            });
+            itemView.setOnTouchListener(new View.OnTouchListener() {
+                private final int touchSlop = ViewConfiguration
+                        .get(ArchiveActivity.this)
+                        .getScaledTouchSlop();
+                private float downX;
+                private float downY;
+                private float downRawX;
+                private float downRawY;
+                private boolean longPressTriggered;
+                private final Runnable longPressRunnable = () -> {
+                    longPressTriggered = true;
+                    vibrateForArchiveLongPress();
+                    showStandaloneReceiptActionsMenu(
+                            receiptItemView,
+                            downRawX,
+                            downRawY,
+                            receiptIndex
                     );
                 };
 
@@ -4212,20 +5838,24 @@ public class ArchiveActivity extends AppCompatActivity {
             ReceiptHistoryStore.HistoryEntry entry = getItem(position);
             TextView receiptNameView = itemView.findViewById(R.id.text_history_receipt_name);
             TextView totalAmountView = itemView.findViewById(R.id.text_history_receipt_total);
-            View statusIconView = itemView.findViewById(R.id.image_history_receipt_status);
-
-            if (statusIconView != null) {
-                statusIconView.setVisibility(View.GONE);
-            }
 
             if (entry != null) {
                 receiptNameView.setText(entry.receiptName);
                 totalAmountView.setText(
                         getString(R.string.archive_summary_transfer_amount, entry.totalAmount)
                 );
+                bindArchiveReceiptIncompleteStatusIcon(itemView, entry, true);
             } else {
                 receiptNameView.setText("");
                 totalAmountView.setText("");
+                AppCompatImageView statusIconView =
+                        itemView.findViewById(R.id.image_history_receipt_status);
+                if (statusIconView != null) {
+                    statusIconView.setVisibility(View.GONE);
+                    statusIconView.setOnClickListener(null);
+                    statusIconView.setClickable(false);
+                    statusIconView.setFocusable(false);
+                }
             }
 
             if (entry != null) {
@@ -4234,6 +5864,7 @@ public class ArchiveActivity extends AppCompatActivity {
                 itemView.setClickable(true);
                 itemView.setFocusable(true);
                 itemView.setOnClickListener(view -> {
+                    dismissArchiveReceiptIncompletePopup();
                     if (receiptIndex < 0 || receiptIndex >= archiveReceipts.size()) {
                         return;
                     }
@@ -4265,7 +5896,10 @@ public class ArchiveActivity extends AppCompatActivity {
                                 archiveIndex,
                                 receiptIndex,
                                 archiveReceipts,
-                                ArchiveReceiptEntriesAdapter.this
+                                () -> {
+                                    loadArchiveNames();
+                                    ArchiveReceiptEntriesAdapter.this.notifyDataSetChanged();
+                                }
                         );
                     };
 

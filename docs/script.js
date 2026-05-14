@@ -2,6 +2,12 @@ const openSwishButton = document.querySelector("#open-swish");
 const swishStatus = document.querySelector("#swish-status");
 const SWISH_PAYMENT_REQUEST_URL = "swish://paymentrequest";
 const SWISH_PAYMENT_URL = "swish://payment?data=";
+const PAYMENT_REQUEST_QUERY_KEY = "request";
+const SUPABASE_PAYMENT_REQUEST_LOOKUP_RPC = "get_payment_request_by_token";
+const SUPABASE_PAYMENT_REQUEST_OPENED_RPC = "mark_payment_request_opened";
+const SUPABASE_PAYMENT_REQUEST_CALLBACK_RPC = "mark_payment_request_callback";
+
+let cachedSupabasePaymentRequest = undefined;
 
 const getQueryParameter = (name) => {
   const requestedName = name.toLowerCase();
@@ -45,6 +51,8 @@ const normalizePhoneNumber = (phoneNumber) => {
 };
 
 const normalizeAmount = (amount) => amount.trim().replace(",", ".");
+const getPaymentRequestToken = () =>
+  getQueryParameter(PAYMENT_REQUEST_QUERY_KEY) || getQueryParameter("requestToken");
 const getPaymentToken = () => getQueryParameter("PaymentToken") || getQueryParameter("Token");
 
 const getMissingPaymentDetailMessage = (phone, amount) => {
@@ -69,8 +77,110 @@ const buildCallbackUrl = () => {
   return callbackUrl.toString();
 };
 
-const buildSwishUrl = () => {
-  const paymentToken = getPaymentToken();
+const getSupabaseClient = () => {
+  const config = window.KVITT_SUPABASE_CONFIG || {};
+  const createClient = window.supabase?.createClient;
+
+  if (typeof createClient !== "function" || !config.url || !config.publishableKey) {
+    return null;
+  }
+
+  if (!window.kvittSupabaseClient) {
+    window.kvittSupabaseClient = createClient(config.url, config.publishableKey);
+  }
+
+  return window.kvittSupabaseClient;
+};
+
+const loadSupabasePaymentRequest = async () => {
+  if (cachedSupabasePaymentRequest !== undefined) {
+    return cachedSupabasePaymentRequest;
+  }
+
+  const requestToken = getPaymentRequestToken();
+  if (!requestToken) {
+    cachedSupabasePaymentRequest = null;
+    return cachedSupabasePaymentRequest;
+  }
+
+  const supabaseClient = getSupabaseClient();
+  if (!supabaseClient) {
+    cachedSupabasePaymentRequest = {
+      found: false,
+      error:
+        "This payment link expects Supabase website config. Add your publishable key in docs/supabase-config.js."
+    };
+    return cachedSupabasePaymentRequest;
+  }
+
+  const { data, error } = await supabaseClient.rpc(SUPABASE_PAYMENT_REQUEST_LOOKUP_RPC, {
+    request_token: requestToken
+  });
+
+  if (error) {
+    cachedSupabasePaymentRequest = {
+      found: false,
+      error: "Unable to load payment details right now. Please try again in a moment."
+    };
+    return cachedSupabasePaymentRequest;
+  }
+
+  cachedSupabasePaymentRequest = data && data.found ? data : null;
+  return cachedSupabasePaymentRequest;
+};
+
+const reportPaymentRequestLifecycleEvent = async (rpcName) => {
+  const requestToken = getPaymentRequestToken();
+  const supabaseClient = getSupabaseClient();
+
+  if (!requestToken || !supabaseClient) {
+    return;
+  }
+
+  try {
+    await supabaseClient.rpc(rpcName, {
+      request_token: requestToken
+    });
+  } catch (error) {
+    console.warn(`Failed to call ${rpcName}.`, error);
+  }
+};
+
+const resolvePaymentDetails = async () => {
+  const paymentRequest = await loadSupabasePaymentRequest();
+
+  if (paymentRequest?.error) {
+    return { error: paymentRequest.error, message: "", amount: "", mode: "", phone: "", paymentToken: "" };
+  }
+
+  if (paymentRequest) {
+    return {
+      error: "",
+      message: paymentRequest.message || "",
+      amount: String(paymentRequest.amount ?? ""),
+      mode: paymentRequest.swishPaymentToken ? "paymentrequest" : "direct",
+      phone: paymentRequest.payeePhone || "",
+      paymentToken: paymentRequest.swishPaymentToken || ""
+    };
+  }
+
+  return {
+    error: "",
+    message: getQueryParameter("Message"),
+    amount: getQueryParameter("Amount"),
+    mode: "",
+    phone: getQueryParameter("Phone"),
+    paymentToken: getPaymentToken()
+  };
+};
+
+const buildSwishUrl = async () => {
+  const paymentDetails = await resolvePaymentDetails();
+  if (paymentDetails.error) {
+    return { error: paymentDetails.error, mode: "", url: "" };
+  }
+
+  const paymentToken = paymentDetails.paymentToken;
   if (paymentToken) {
     return {
       error: "",
@@ -81,9 +191,9 @@ const buildSwishUrl = () => {
     };
   }
 
-  const phone = normalizePhoneNumber(getQueryParameter("Phone"));
-  const amount = normalizeAmount(getQueryParameter("Amount"));
-  const message = getQueryParameter("Message");
+  const phone = normalizePhoneNumber(paymentDetails.phone);
+  const amount = normalizeAmount(paymentDetails.amount);
+  const message = paymentDetails.message;
   const validationMessage = getMissingPaymentDetailMessage(phone, amount);
 
   if (validationMessage) {
@@ -114,13 +224,16 @@ const buildSwishUrl = () => {
 };
 
 if (openSwishButton && swishStatus) {
+  void reportPaymentRequestLifecycleEvent(SUPABASE_PAYMENT_REQUEST_OPENED_RPC);
+
   if (getQueryParameter("swish-return") === "1") {
     openSwishButton.hidden = true;
-    swishStatus.textContent = "The receipt manager has been notefied of your payment. Thank you for using Kvitt!";
+    swishStatus.textContent = "The receipt manager has been notified of your payment. Thank you for using Kvitt!";
+    void reportPaymentRequestLifecycleEvent(SUPABASE_PAYMENT_REQUEST_CALLBACK_RPC);
   }
 
-  openSwishButton.addEventListener("click", () => {
-    const swishLink = buildSwishUrl();
+  openSwishButton.addEventListener("click", async () => {
+    const swishLink = await buildSwishUrl();
     if (swishLink.error) {
       swishStatus.textContent = swishLink.error;
       return;

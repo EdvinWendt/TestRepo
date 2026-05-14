@@ -28,6 +28,9 @@ public final class AppSettings {
     private static final String KEY_USERNAME_NICKNAME = "username_nickname";
     private static final String KEY_STARTUP_PERMISSION_PROMPT_SHOWN =
             "startup_permission_prompt_shown";
+    private static final String KEY_LOGIN_COMPLETED = "login_completed";
+    private static final String KEY_LOGIN_EMAIL = "login_email";
+    private static final String KEY_LOGIN_PHONE_NUMBER = "login_phone_number";
     private static final boolean DEFAULT_AUTO_ROTATE_IMAGE_ENABLED = true;
     private static final boolean DEFAULT_DARK_THEME_ENABLED = false;
     private static final boolean DEFAULT_SPLIT_ITEMS_ENABLED = false;
@@ -36,6 +39,8 @@ public final class AppSettings {
     @NonNull
     private static final String ACCENT_COLOR_GREEN = "green";
     private static final String DEFAULT_USERNAME_NICKNAME = "";
+    private static final String DEFAULT_LOGIN_EMAIL = "";
+    private static final String DEFAULT_LOGIN_PHONE_NUMBER = "";
     private static final String JSON_KEY_NAME = "name";
     private static final String JSON_KEY_PHONE = "phone";
 
@@ -157,6 +162,56 @@ public final class AppSettings {
         getPreferences(context)
                 .edit()
                 .putBoolean(KEY_STARTUP_PERMISSION_PROMPT_SHOWN, shown)
+                .apply();
+    }
+
+    public static boolean hasCompletedLogin(@NonNull Context context) {
+        return getPreferences(context).getBoolean(KEY_LOGIN_COMPLETED, false);
+    }
+
+    public static boolean isSignedIn(@NonNull Context context) {
+        return hasCompletedLogin(context) && !getLoginEmail(context).isEmpty();
+    }
+
+    public static void setLoginCompleted(@NonNull Context context, boolean completed) {
+        getPreferences(context)
+                .edit()
+                .putBoolean(KEY_LOGIN_COMPLETED, completed)
+                .apply();
+    }
+
+    @NonNull
+    public static String getLoginEmail(@NonNull Context context) {
+        String storedValue = getPreferences(context).getString(
+                KEY_LOGIN_EMAIL,
+                DEFAULT_LOGIN_EMAIL
+        );
+        return normalizeWhitespace(storedValue);
+    }
+
+    public static void setLoginEmail(@NonNull Context context, @Nullable String email) {
+        getPreferences(context)
+                .edit()
+                .putString(KEY_LOGIN_EMAIL, normalizeWhitespace(email))
+                .apply();
+    }
+
+    @NonNull
+    public static String getLoginPhoneNumber(@NonNull Context context) {
+        String storedValue = getPreferences(context).getString(
+                KEY_LOGIN_PHONE_NUMBER,
+                DEFAULT_LOGIN_PHONE_NUMBER
+        );
+        return normalizeWhitespace(storedValue);
+    }
+
+    public static void setLoginPhoneNumber(
+            @NonNull Context context,
+            @Nullable String phoneNumber
+    ) {
+        getPreferences(context)
+                .edit()
+                .putString(KEY_LOGIN_PHONE_NUMBER, normalizeWhitespace(phoneNumber))
                 .apply();
     }
 

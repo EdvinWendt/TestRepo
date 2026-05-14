@@ -52,46 +52,82 @@
             android:textStyle="bold" />
     </RelativeLayout>
 
-    <FrameLayout
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
+        android:orientation="vertical"
         android:padding="16dp">
 
-        <ListView
-            android:id="@+id/list_archive_receipts"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:clipToPadding="false"
-            android:divider="@android:color/transparent"
-            android:dividerHeight="12dp"
-            android:paddingBottom="88dp" />
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/text_archive_empty"
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/button_add_archive"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="88dp"
+                android:layout_weight="1"
+                android:contentDescription="@string/button_new_folder"
+                android:gravity="center"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:text="@string/button_new_folder"
+                android:textAllCaps="false"
+                app:cornerRadius="16dp"
+                app:icon="@drawable/ic_archive_entry_folder"
+                app:iconGravity="textTop"
+                app:iconPadding="8dp"
+                app:iconSize="28dp"
+                app:iconTint="?attr/colorPrimary" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/button_new_receipt"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="88dp"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:contentDescription="@string/button_new_receipt"
+                android:gravity="center"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:text="@string/button_new_receipt"
+                android:textAllCaps="false"
+                app:cornerRadius="16dp"
+                app:icon="@drawable/ic_archive_new_receipt_button"
+                app:iconGravity="textTop"
+                app:iconPadding="8dp"
+                app:iconSize="28dp"
+                app:iconTint="?attr/colorPrimary" />
+        </LinearLayout>
+
+        <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:gravity="center"
-            android:padding="24dp"
-            android:text="@string/archive_empty"
-            android:textAppearance="?attr/textAppearanceBodyLarge" />
+            android:layout_height="0dp"
+            android:layout_weight="1">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/button_add_archive"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
-            android:layout_gravity="bottom|center_horizontal"
-            android:layout_marginBottom="8dp"
-            android:contentDescription="@string/new_archive_title"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:minHeight="0dp"
-            android:minWidth="0dp"
-            android:padding="0dp"
-            android:text="+"
-            android:textSize="28sp"
-            android:textStyle="bold"
-            app:cornerRadius="32dp" />
-    </FrameLayout>
+            <ListView
+                android:id="@+id/list_archive_receipts"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:divider="@android:color/transparent"
+                android:dividerHeight="12dp" />
+
+            <TextView
+                android:id="@+id/text_archive_empty"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:padding="24dp"
+                android:text="@string/archive_empty"
+                android:textAppearance="?attr/textAppearanceBodyLarge" />
+        </FrameLayout>
+    </LinearLayout>
 
 </LinearLayout>

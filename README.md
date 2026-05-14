@@ -2,6 +2,13 @@
 
 Android app for scanning receipts, splitting totals between participants, and preparing Swish payment reminders.
 
+## Supabase backend
+
+Supabase setup files now live in [supabase/](C:/Users/Administrator/Documents/TestRepo/supabase).
+
+- Database schema: [supabase/schema.sql](C:/Users/Administrator/Documents/TestRepo/supabase/schema.sql)
+- Setup notes: [supabase/README.md](C:/Users/Administrator/Documents/TestRepo/supabase/README.md)
+
 ## Website
 
 The GitHub Pages website lives in `docs/`.

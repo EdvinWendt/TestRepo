@@ -3,6 +3,16 @@
 
     <item
         android:id="@+id/action_settings"
-        android:icon="@drawable/ic_menu_settings"
+        android:icon="@drawable/ic_menu_settings_custom"
         android:title="@string/settings" />
+
+    <item
+        android:id="@+id/action_account"
+        android:icon="@drawable/ic_menu_account_custom"
+        android:title="@string/account" />
+
+    <item
+        android:id="@+id/action_add_to_archive"
+        android:icon="@drawable/ic_main_archive_bookmark"
+        android:title="@string/add_to_archive" />
 </menu>

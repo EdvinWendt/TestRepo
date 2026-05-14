@@ -36,7 +36,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_centerInParent="true"
-            android:text="@string/archive_summary"
+            android:text="@string/folder_summary"
             android:textAppearance="?attr/textAppearanceTitleLarge"
             android:textColor="?attr/colorOnPrimary"
             android:textStyle="bold" />

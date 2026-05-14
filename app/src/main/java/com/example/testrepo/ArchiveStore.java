@@ -17,6 +17,7 @@ public final class ArchiveStore {
     private static final String PREFS_NAME = "archive_store";
     private static final String LEGACY_KEY_ARCHIVE_NAMES = "archive_names";
     private static final String KEY_ARCHIVES = "archives";
+    private static final String KEY_STANDALONE_RECEIPTS = "standalone_receipts";
     private static final String KEY_ARCHIVE_NAME = "name";
     private static final String KEY_ARCHIVE_RECEIPTS = "receipts";
 
@@ -97,6 +98,48 @@ public final class ArchiveStore {
         Archive archive = archives.get(archiveIndex);
         archive.receipts.add(0, receiptEntry);
         saveArchives(context, archives);
+    }
+
+    @NonNull
+    public static ArrayList<ReceiptHistoryStore.HistoryEntry> loadStandaloneReceipts(
+            @NonNull Context context
+    ) {
+        SharedPreferences preferences =
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        return parseReceiptsArray(preferences.getString(KEY_STANDALONE_RECEIPTS, "[]"));
+    }
+
+    public static void addStandaloneReceipt(
+            @NonNull Context context,
+            @NonNull ReceiptHistoryStore.HistoryEntry receiptEntry
+    ) {
+        ArrayList<ReceiptHistoryStore.HistoryEntry> receipts = loadStandaloneReceipts(context);
+        receipts.add(0, receiptEntry);
+        saveStandaloneReceipts(context, receipts);
+    }
+
+    public static void updateStandaloneReceiptAt(
+            @NonNull Context context,
+            int receiptIndex,
+            @NonNull ReceiptHistoryStore.HistoryEntry receiptEntry
+    ) {
+        ArrayList<ReceiptHistoryStore.HistoryEntry> receipts = loadStandaloneReceipts(context);
+        if (receiptIndex < 0 || receiptIndex >= receipts.size()) {
+            return;
+        }
+
+        receipts.set(receiptIndex, receiptEntry);
+        saveStandaloneReceipts(context, receipts);
+    }
+
+    public static void removeStandaloneReceiptAt(@NonNull Context context, int receiptIndex) {
+        ArrayList<ReceiptHistoryStore.HistoryEntry> receipts = loadStandaloneReceipts(context);
+        if (receiptIndex < 0 || receiptIndex >= receipts.size()) {
+            return;
+        }
+
+        receipts.remove(receiptIndex);
+        saveStandaloneReceipts(context, receipts);
     }
 
     public static void renameArchiveAt(
@@ -184,6 +227,53 @@ public final class ArchiveStore {
         saveArchives(context, archives);
     }
 
+    public static void moveReceiptToStandalone(
+            @NonNull Context context,
+            int sourceArchiveIndex,
+            int receiptIndex
+    ) {
+        ArrayList<Archive> archives = loadArchives(context);
+        if (sourceArchiveIndex < 0 || sourceArchiveIndex >= archives.size()) {
+            return;
+        }
+
+        Archive sourceArchive = archives.get(sourceArchiveIndex);
+        if (receiptIndex < 0 || receiptIndex >= sourceArchive.receipts.size()) {
+            return;
+        }
+
+        ReceiptHistoryStore.HistoryEntry receiptEntry = sourceArchive.receipts.remove(receiptIndex);
+        saveArchives(context, archives);
+
+        ArrayList<ReceiptHistoryStore.HistoryEntry> standaloneReceipts =
+                loadStandaloneReceipts(context);
+        standaloneReceipts.add(0, receiptEntry);
+        saveStandaloneReceipts(context, standaloneReceipts);
+    }
+
+    public static void moveStandaloneReceiptToArchive(
+            @NonNull Context context,
+            int receiptIndex,
+            int targetArchiveIndex
+    ) {
+        ArrayList<ReceiptHistoryStore.HistoryEntry> standaloneReceipts =
+                loadStandaloneReceipts(context);
+        if (receiptIndex < 0 || receiptIndex >= standaloneReceipts.size()) {
+            return;
+        }
+
+        ArrayList<Archive> archives = loadArchives(context);
+        if (targetArchiveIndex < 0 || targetArchiveIndex >= archives.size()) {
+            return;
+        }
+
+        ReceiptHistoryStore.HistoryEntry receiptEntry = standaloneReceipts.remove(receiptIndex);
+        saveStandaloneReceipts(context, standaloneReceipts);
+
+        archives.get(targetArchiveIndex).receipts.add(0, receiptEntry);
+        saveArchives(context, archives);
+    }
+
     public static void removeArchiveAt(@NonNull Context context, int index) {
         ArrayList<Archive> archives = loadArchives(context);
         if (index < 0 || index >= archives.size()) {
@@ -210,6 +300,16 @@ public final class ArchiveStore {
                 .apply();
     }
 
+    private static void saveStandaloneReceipts(
+            @NonNull Context context,
+            @NonNull List<ReceiptHistoryStore.HistoryEntry> receipts
+    ) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_STANDALONE_RECEIPTS, serializeReceipts(receipts).toString())
+                .apply();
+    }
+
     @NonNull
     private static ArrayList<Archive> loadLegacyArchives(@NonNull SharedPreferences preferences) {
         String rawArchiveNames = preferences.getString(LEGACY_KEY_ARCHIVE_NAMES, "[]");
@@ -228,6 +328,42 @@ public final class ArchiveStore {
         }
 
         return archives;
+    }
+
+    @NonNull
+    private static JSONArray serializeReceipts(
+            @NonNull List<ReceiptHistoryStore.HistoryEntry> receipts
+    ) {
+        JSONArray receiptsArray = new JSONArray();
+        for (ReceiptHistoryStore.HistoryEntry receipt : receipts) {
+            receiptsArray.put(receipt.toJson());
+        }
+        return receiptsArray;
+    }
+
+    @NonNull
+    private static ArrayList<ReceiptHistoryStore.HistoryEntry> parseReceiptsArray(
+            @Nullable String rawReceipts
+    ) {
+        ArrayList<ReceiptHistoryStore.HistoryEntry> receipts = new ArrayList<>();
+        if (rawReceipts == null) {
+            return receipts;
+        }
+
+        try {
+            JSONArray receiptsArray = new JSONArray(rawReceipts);
+            for (int index = 0; index < receiptsArray.length(); index++) {
+                JSONObject receiptObject = receiptsArray.optJSONObject(index);
+                if (receiptObject == null) {
+                    continue;
+                }
+                receipts.add(ReceiptHistoryStore.HistoryEntry.fromJson(receiptObject));
+            }
+        } catch (JSONException exception) {
+            return new ArrayList<>();
+        }
+
+        return receipts;
     }
 
     static final class Archive {

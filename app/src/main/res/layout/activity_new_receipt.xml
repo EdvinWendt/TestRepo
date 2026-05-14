@@ -382,48 +382,31 @@
                     </LinearLayout>
                 </androidx.core.widget.NestedScrollView>
 
-                <LinearLayout
+                <FrameLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:baselineAligned="false"
-                    android:orientation="horizontal">
+                    android:layout_marginTop="16dp">
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/button_add_to_archive"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="0dp"
+                        android:id="@+id/button_next"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
-                        android:layout_weight="1"
-                        android:text="@string/add_to_archive" />
+                        android:text="@string/summary" />
 
-                    <FrameLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1">
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/button_next"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="@string/summary" />
-
-                        <androidx.appcompat.widget.AppCompatImageButton
-                            android:id="@+id/button_next_disabled_info"
-                            android:layout_width="40dp"
-                            android:layout_height="40dp"
-                            android:layout_gravity="end|center_vertical"
-                            android:layout_marginEnd="12dp"
-                            android:background="?attr/selectableItemBackgroundBorderless"
-                            android:contentDescription="@string/next_disabled_reasons"
-                            android:padding="6dp"
-                            android:scaleType="centerInside"
-                            android:tint="?attr/colorOnSurfaceVariant"
-                            android:visibility="gone"
-                            app:srcCompat="@drawable/ic_warning_outline" />
-                    </FrameLayout>
-                </LinearLayout>
+                    <androidx.appcompat.widget.AppCompatImageButton
+                        android:id="@+id/button_next_disabled_info"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_gravity="end|center_vertical"
+                        android:layout_marginEnd="12dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/next_disabled_reasons"
+                        android:padding="6dp"
+                        android:scaleType="centerInside"
+                        android:tint="?attr/colorOnSurfaceVariant"
+                        android:visibility="gone"
+                        app:srcCompat="@drawable/ic_warning_outline" />
+                </FrameLayout>
             </LinearLayout>
 
             <TextView

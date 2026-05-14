@@ -84,6 +84,9 @@ public class HistoryActivity extends AppCompatActivity {
         appliedThemeConfigurationKey = AppSettings.getThemeConfigurationKey(this);
         super.onCreate(savedInstanceState);
         InstallResetHelper.resetInstallScopedDataIfNeeded(this);
+        if (AuthGateHelper.redirectToLoginIfNeeded(this)) {
+            return;
+        }
         setContentView(R.layout.activity_history);
 
         View backButton = findViewById(R.id.button_back);
@@ -109,6 +112,9 @@ public class HistoryActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (AuthGateHelper.redirectToLoginIfNeeded(this)) {
+            return;
+        }
         if (recreateIfThemeConfigurationChanged()) {
             return;
         }
@@ -1262,7 +1268,7 @@ public class HistoryActivity extends AppCompatActivity {
             selectionButton.setMinimumWidth(0);
             selectionButton.setMinimumHeight(0);
             selectionButton.setPadding(0, 0, 0, 0);
-            selectionButton.setCornerRadius(dpToPx(10));
+            selectionButton.setCornerRadius(checkboxSize / 2);
             selectionButton.setStrokeWidth(dpToPx(2));
             applyParticipantBadgeTextStyle(selectionButton, participant, true);
             selectionButton.setBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));

@@ -18,6 +18,9 @@ public class MainActivity extends AppCompatActivity {
         appliedThemeConfigurationKey = AppSettings.getThemeConfigurationKey(this);
         super.onCreate(savedInstanceState);
         InstallResetHelper.resetInstallScopedDataIfNeeded(this);
+        if (AuthGateHelper.redirectToLoginIfNeeded(this)) {
+            return;
+        }
         setContentView(R.layout.activity_main);
         getSupportFragmentManager().setFragmentResultListener(
                 EditUsernameDialogFragment.REQUEST_KEY,
@@ -54,6 +57,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (AuthGateHelper.redirectToLoginIfNeeded(this)) {
+            return;
+        }
         recreateIfThemeConfigurationChanged();
     }
 

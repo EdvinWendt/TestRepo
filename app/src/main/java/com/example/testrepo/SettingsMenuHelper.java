@@ -31,6 +31,10 @@ final class SettingsMenuHelper {
             @NonNull AppCompatActivity activity,
             @NonNull MenuItem menuItem
     ) {
+        if (menuItem.getItemId() == R.id.action_account) {
+            AccountDialogFragment.show(activity.getSupportFragmentManager());
+            return true;
+        }
         if (menuItem.getItemId() == R.id.action_settings) {
             SettingsDialogFragment.show(activity.getSupportFragmentManager());
             return true;
