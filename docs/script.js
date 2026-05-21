@@ -7,6 +7,7 @@ const SWISH_PAYMENT_URL = "swish://payment?data=";
 const PAYMENT_REQUEST_QUERY_KEY = "request";
 const SUPABASE_PAYMENT_REQUEST_LOOKUP_RPC = "get_payment_request_by_token";
 const SUPABASE_HISTORY_PAYMENT_CARD_LOOKUP_RPC = "get_history_payment_card_by_short_id";
+const SUPABASE_HISTORY_PAYMENT_CARD_MARK_PAID_RPC = "mark_history_payment_card_paid";
 const SUPABASE_PAYMENT_REQUEST_OPENED_RPC = "mark_payment_request_opened";
 const SUPABASE_PAYMENT_REQUEST_CALLBACK_RPC = "mark_payment_request_callback";
 
@@ -251,6 +252,47 @@ const initializeCompactHistoryPaymentState = async () => {
   }
 };
 
+const markCompactHistoryPaymentCardPaid = async () => {
+  if (!hasCompactHistoryPaymentLink()) {
+    return { found: true };
+  }
+
+  const supabaseClient = getSupabaseClient();
+  if (!supabaseClient) {
+    return {
+      error:
+        "This payment link expects Supabase website config. Add your publishable key in docs/supabase-config.js."
+    };
+  }
+
+  const { data, error } = await supabaseClient.rpc(
+    SUPABASE_HISTORY_PAYMENT_CARD_MARK_PAID_RPC,
+    {
+      receipt_short_id: getReceiptShortId(),
+      payment_card_id: getPaymentCardId()
+    }
+  );
+
+  if (error) {
+    return {
+      error: "Unable to update payment status right now. Please try again in a moment."
+    };
+  }
+
+  if (!data || !data.found) {
+    return {
+      error: "Receipt ID not found."
+    };
+  }
+
+  cachedSupabaseHistoryPaymentCard = data;
+  compactHistoryLinkReady = true;
+  setSwishNotice(
+    "This payment has been marked as paid. Before clicking the button, check your Swish history so you don't accidentally pay twice."
+  );
+  return data;
+};
+
 const resolvePaymentDetails = async () => {
   const paymentRequest = await loadSupabasePaymentRequest();
   const historyPaymentCard = await loadSupabaseHistoryPaymentCard();
@@ -374,9 +416,18 @@ if (openSwishButton && swishStatus) {
       return;
     }
 
+    openSwishButton.disabled = true;
     const swishLink = await buildSwishUrl();
     if (swishLink.error) {
       swishStatus.textContent = swishLink.error;
+      openSwishButton.disabled = false;
+      return;
+    }
+
+    const paymentStatusUpdate = await markCompactHistoryPaymentCardPaid();
+    if (paymentStatusUpdate?.error) {
+      swishStatus.textContent = paymentStatusUpdate.error;
+      openSwishButton.disabled = false;
       return;
     }
 
@@ -384,6 +435,7 @@ if (openSwishButton && swishStatus) {
 
     const fallbackTimer = window.setTimeout(() => {
       if (document.visibilityState === "visible") {
+        openSwishButton.disabled = false;
         swishStatus.textContent =
           swishLink.mode === "paymentrequest"
             ? "If Swish did not open, make sure you are on a phone with Swish installed."
