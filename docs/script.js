@@ -1,17 +1,15 @@
 const openSwishButton = document.querySelector("#open-swish");
 const swishStatus = document.querySelector("#swish-status");
-const phoneAccessWarning = document.querySelector("#phone-access-warning");
-const phoneAccessLink = document.querySelector("#phone-access-link");
 const SWISH_PAYMENT_REQUEST_URL = "swish://paymentrequest";
 const SWISH_PAYMENT_URL = "swish://payment?data=";
 const PAYMENT_REQUEST_QUERY_KEY = "request";
 const SUPABASE_PAYMENT_REQUEST_LOOKUP_RPC = "get_payment_request_by_token";
+const SUPABASE_HISTORY_PAYMENT_CARD_LOOKUP_RPC = "get_history_payment_card_by_short_id";
 const SUPABASE_PAYMENT_REQUEST_OPENED_RPC = "mark_payment_request_opened";
 const SUPABASE_PAYMENT_REQUEST_CALLBACK_RPC = "mark_payment_request_callback";
-const SELECTED_PHONE_NUMBER_STORAGE_KEY = "kvittSelectedPhoneNumber";
 
 let cachedSupabasePaymentRequest = undefined;
-let selectedPhoneNumber = loadSelectedPhoneNumber();
+let cachedSupabaseHistoryPaymentCard = undefined;
 
 const getQueryParameter = (name) => {
   const requestedName = name.toLowerCase();
@@ -58,6 +56,9 @@ const normalizeAmount = (amount) => amount.trim().replace(",", ".");
 const getPaymentRequestToken = () =>
   getQueryParameter(PAYMENT_REQUEST_QUERY_KEY) || getQueryParameter("requestToken");
 const getPaymentToken = () => getQueryParameter("PaymentToken") || getQueryParameter("Token");
+const getReceiptShortId = () => getQueryParameter("R");
+const getPaymentCardId = () => getQueryParameter("PC");
+const hasCompactHistoryPaymentLink = () => !!(getReceiptShortId() && getPaymentCardId());
 
 const getMissingPaymentDetailMessage = (phone, amount) => {
   if (!phone) {
@@ -79,80 +80,6 @@ const buildCallbackUrl = () => {
   callbackUrl.searchParams.delete("token");
   callbackUrl.searchParams.set("swish-return", "1");
   return callbackUrl.toString();
-};
-
-function loadSelectedPhoneNumber() {
-  try {
-    return window.sessionStorage.getItem(SELECTED_PHONE_NUMBER_STORAGE_KEY)?.trim() || "";
-  } catch (error) {
-    return "";
-  }
-}
-
-const storeSelectedPhoneNumber = (phoneNumber) => {
-  selectedPhoneNumber = phoneNumber.trim();
-
-  try {
-    if (selectedPhoneNumber) {
-      window.sessionStorage.setItem(SELECTED_PHONE_NUMBER_STORAGE_KEY, selectedPhoneNumber);
-    } else {
-      window.sessionStorage.removeItem(SELECTED_PHONE_NUMBER_STORAGE_KEY);
-    }
-  } catch (error) {
-    // Ignore storage errors and continue with the in-memory value.
-  }
-};
-
-const hidePhoneAccessWarning = () => {
-  if (phoneAccessWarning) {
-    phoneAccessWarning.hidden = true;
-  }
-};
-
-const showPhoneAccessWarning = () => {
-  if (phoneAccessWarning) {
-    phoneAccessWarning.hidden = false;
-  }
-};
-
-const canRequestPhoneNumber = () =>
-  !!(navigator.contacts && typeof navigator.contacts.select === "function");
-
-const requestPhoneNumberAccess = async () => {
-  if (selectedPhoneNumber) {
-    hidePhoneAccessWarning();
-    return true;
-  }
-
-  if (!canRequestPhoneNumber()) {
-    showPhoneAccessWarning();
-    swishStatus.textContent = "This browser can't request a phone number directly.";
-    return false;
-  }
-
-  try {
-    const selectedContacts = await navigator.contacts.select(["tel"], {
-      multiple: false
-    });
-    const selectedContact = selectedContacts?.[0];
-    const grantedPhoneNumber =
-      selectedContact?.tel?.find((phoneNumber) => phoneNumber && phoneNumber.trim())?.trim() || "";
-
-    if (!grantedPhoneNumber) {
-      showPhoneAccessWarning();
-      swishStatus.textContent = "";
-      return false;
-    }
-
-    storeSelectedPhoneNumber(grantedPhoneNumber);
-    hidePhoneAccessWarning();
-    swishStatus.textContent = "";
-    return true;
-  } catch (error) {
-    showPhoneAccessWarning();
-    swishStatus.textContent = "";
-    return false;
-  }
 };
 
 const getSupabaseClient = () => {
@@ -207,6 +134,48 @@ const loadSupabasePaymentRequest = async () => {
   return cachedSupabasePaymentRequest;
 };
 
+const loadSupabaseHistoryPaymentCard = async () => {
+  if (cachedSupabaseHistoryPaymentCard !== undefined) {
+    return cachedSupabaseHistoryPaymentCard;
+  }
+
+  const receiptShortId = getReceiptShortId();
+  const paymentCardId = getPaymentCardId();
+  if (!receiptShortId || !paymentCardId) {
+    cachedSupabaseHistoryPaymentCard = null;
+    return cachedSupabaseHistoryPaymentCard;
+  }
+
+  const supabaseClient = getSupabaseClient();
+  if (!supabaseClient) {
+    cachedSupabaseHistoryPaymentCard = {
+      found: false,
+      error:
+        "This payment link expects Supabase website config. Add your publishable key in docs/supabase-config.js."
+    };
+    return cachedSupabaseHistoryPaymentCard;
+  }
+
+  const { data, error } = await supabaseClient.rpc(
+    SUPABASE_HISTORY_PAYMENT_CARD_LOOKUP_RPC,
+    {
+      receipt_short_id: receiptShortId,
+      payment_card_id: paymentCardId
+    }
+  );
+
+  if (error) {
+    cachedSupabaseHistoryPaymentCard = {
+      found: false,
+      error: "Unable to load payment details right now. Please try again in a moment."
+    };
+    return cachedSupabaseHistoryPaymentCard;
+  }
+
+  cachedSupabaseHistoryPaymentCard = data && data.found ? data : null;
+  return cachedSupabaseHistoryPaymentCard;
+};
+
 const reportPaymentRequestLifecycleEvent = async (rpcName) => {
   const requestToken = getPaymentRequestToken();
   const supabaseClient = getSupabaseClient();
@@ -226,9 +195,14 @@ const reportPaymentRequestLifecycleEvent = async (rpcName) => {
 
 const resolvePaymentDetails = async () => {
   const paymentRequest = await loadSupabasePaymentRequest();
+  const historyPaymentCard = await loadSupabaseHistoryPaymentCard();
 
   if (paymentRequest?.error) {
     return { error: paymentRequest.error, message: "", amount: "", mode: "", phone: "", paymentToken: "" };
+  }
+
+  if (historyPaymentCard?.error) {
+    return { error: historyPaymentCard.error, message: "", amount: "", mode: "", phone: "", paymentToken: "" };
   }
 
   if (paymentRequest) {
@@ -239,6 +213,28 @@ const resolvePaymentDetails = async () => {
       mode: paymentRequest.swishPaymentToken ? "paymentrequest" : "direct",
       phone: paymentRequest.payeePhone || "",
       paymentToken: paymentRequest.swishPaymentToken || ""
+    };
+  }
+
+  if (historyPaymentCard) {
+    return {
+      error: "",
+      message: historyPaymentCard.message || "",
+      amount: String(historyPaymentCard.amount ?? ""),
+      mode: "direct",
+      phone: historyPaymentCard.recipientPhone || "",
+      paymentToken: ""
+    };
+  }
+
+  if (hasCompactHistoryPaymentLink()) {
+    return {
+      error: "This payment link is invalid or no longer available.",
+      message: "",
+      amount: "",
+      mode: "",
+      phone: "",
+      paymentToken: ""
     };
   }
 
@@ -275,7 +271,7 @@ const buildSwishUrl = async () => {
   const validationMessage = getMissingPaymentDetailMessage(phone, amount);
 
   if (validationMessage) {
-    return { error: `${validationMessage} Add PaymentToken to return here after payment.`, mode: "", url: "" };
+    return { error: validationMessage, mode: "", url: "" };
   }
 
   const paymentData = {
@@ -306,21 +302,11 @@ if (openSwishButton && swishStatus) {
 
   if (getQueryParameter("swish-return") === "1") {
     openSwishButton.hidden = true;
-    hidePhoneAccessWarning();
     swishStatus.textContent = "The receipt manager has been notified of your payment. Thank you for using Kvitt!";
     void reportPaymentRequestLifecycleEvent(SUPABASE_PAYMENT_REQUEST_CALLBACK_RPC);
   }
 
-  phoneAccessLink?.addEventListener("click", async () => {
-    await requestPhoneNumberAccess();
-  });
-
   openSwishButton.addEventListener("click", async () => {
-    const hasPhoneNumberAccess = await requestPhoneNumberAccess();
-    if (!hasPhoneNumberAccess) {
-      return;
-    }
-
     const swishLink = await buildSwishUrl();
     if (swishLink.error) {
       swishStatus.textContent = swishLink.error;
@@ -334,7 +320,7 @@ if (openSwishButton && swishStatus) {
         swishStatus.textContent =
           swishLink.mode === "paymentrequest"
             ? "If Swish did not open, make sure you are on a phone with Swish installed."
-            : "If Swish opened, this direct-payment mode may not return here automatically. Use PaymentToken for return-to-site flow.";
+            : "If Swish opened, this direct-payment mode may not return here automatically.";
       }
     }, 1600);
 

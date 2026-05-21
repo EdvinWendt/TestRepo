@@ -42,29 +42,6 @@ body {
   gap: 12px;
 }
 
-.phone-access-warning {
-  color: #9f2a2a;
-  font-size: 0.95rem;
-  line-height: 1.5;
-  margin: 0;
-  max-width: 22rem;
-  text-align: center;
-}
-
-.phone-access-link {
-  background: none;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  padding: 0;
-  text-decoration: underline;
-}
-
-.phone-access-link:hover {
-  opacity: 0.85;
-}
-
 .swish-button {
   background: #1f4a7c;
   border: 0;
