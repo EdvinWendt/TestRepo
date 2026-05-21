@@ -7,11 +7,32 @@ body {
   font-family: Arial, sans-serif;
 }
 
+.site-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 24px 16px 40px;
+}
+
+.site-header {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.site-logo {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  width: min(420px, 100%);
+}
+
 .page {
   align-items: center;
   display: flex;
+  flex: 1;
   justify-content: center;
-  min-height: 100vh;
+  width: 100%;
 }
 
 .swish-panel {
@@ -19,6 +40,29 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.phone-access-warning {
+  color: #9f2a2a;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 22rem;
+  text-align: center;
+}
+
+.phone-access-link {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.phone-access-link:hover {
+  opacity: 0.85;
 }
 
 .swish-button {

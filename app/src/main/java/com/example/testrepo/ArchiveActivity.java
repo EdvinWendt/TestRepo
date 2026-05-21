@@ -2,6 +2,7 @@ package com.example.testrepo;
 
 import android.Manifest;
 import android.app.Dialog;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
@@ -1167,9 +1168,20 @@ public class ArchiveActivity extends AppCompatActivity {
 
         noButton.setOnClickListener(view -> confirmationDialog.dismiss());
         yesButton.setOnClickListener(view -> {
-            ReceiptHistoryStore.saveEntry(
-                    this,
-                    buildArchiveSummaryHistoryEntry(requestName, archiveReceipts)
+            Context appContext = getApplicationContext();
+            SupabaseHistoryService.saveEntry(
+                    appContext,
+                    buildArchiveSummaryHistoryEntry(requestName, archiveReceipts),
+                    new SupabaseHistoryService.SimpleCallback() {
+                        @Override
+                        public void onSuccess() {
+                        }
+
+                        @Override
+                        public void onError(@NonNull String message) {
+                            Toast.makeText(appContext, message, Toast.LENGTH_SHORT).show();
+                        }
+                    }
             );
             confirmationDialog.dismiss();
             archiveSummaryDialog.dismiss();

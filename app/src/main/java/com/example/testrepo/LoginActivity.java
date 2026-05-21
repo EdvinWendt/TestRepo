@@ -27,7 +27,7 @@ public class LoginActivity extends AppCompatActivity {
         InstallResetHelper.resetInstallScopedDataIfNeeded(this);
 
         if (AppSettings.isSignedIn(this)) {
-            openMainView();
+            openExistingMainView();
             return;
         }
 
@@ -110,9 +110,12 @@ public class LoginActivity extends AppCompatActivity {
 
                 signInButton.setEnabled(true);
                 signInButton.setText(R.string.login_sign_in);
+                syncLocalProfile(authResponse);
+                AppSettings.setLoginAccessToken(LoginActivity.this, authResponse.accessToken);
+                AppSettings.setLoginRefreshToken(LoginActivity.this, authResponse.refreshToken);
                 AppSettings.setLoginEmail(LoginActivity.this, email);
                 AppSettings.setLoginCompleted(LoginActivity.this, true);
-                openMainView();
+                openMainView(authResponse);
             }
 
             @Override
@@ -134,8 +137,26 @@ public class LoginActivity extends AppCompatActivity {
         });
     }
 
-    private void openMainView() {
-        Intent intent = new Intent(this, MainActivity.class);
+    private void syncLocalProfile(@NonNull SupabaseAuthService.AuthResponse authResponse) {
+        if (!AppSettings.isValidUsernameNickname(AppSettings.getUsernameNickname(this))
+                && AppSettings.isValidUsernameNickname(authResponse.displayName)) {
+            AppSettings.setUsernameNickname(this, authResponse.displayName);
+        }
+        if (!AppSettings.isValidPhoneNumber(AppSettings.getLoginPhoneNumber(this))
+                && AppSettings.isValidPhoneNumber(authResponse.phoneNumber)) {
+            AppSettings.setLoginPhoneNumber(this, authResponse.phoneNumber);
+        }
+    }
+
+    private void openMainView(@NonNull SupabaseAuthService.AuthResponse authResponse) {
+        Intent intent = MainActivity.createIntent(this, true, authResponse.accessToken);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(intent);
+        finish();
+    }
+
+    private void openExistingMainView() {
+        Intent intent = MainActivity.createIntent(this);
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
         startActivity(intent);
         finish();

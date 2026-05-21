@@ -96,6 +96,9 @@ public class AccountDialogFragment extends DialogFragment {
         AppSettings.setLoginCompleted(requireContext(), false);
         AppSettings.setLoginEmail(requireContext(), "");
         AppSettings.setLoginPhoneNumber(requireContext(), "");
+        AppSettings.clearLoginAccessToken(requireContext());
+        AppSettings.clearLoginRefreshToken(requireContext());
+        AppSettings.clearUsernameNickname(requireContext());
 
         Intent intent = new Intent(requireContext(), LoginActivity.class);
         intent.addFlags(

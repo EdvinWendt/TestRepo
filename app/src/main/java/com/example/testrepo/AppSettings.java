@@ -31,6 +31,8 @@ public final class AppSettings {
     private static final String KEY_LOGIN_COMPLETED = "login_completed";
     private static final String KEY_LOGIN_EMAIL = "login_email";
     private static final String KEY_LOGIN_PHONE_NUMBER = "login_phone_number";
+    private static final String KEY_LOGIN_ACCESS_TOKEN = "login_access_token";
+    private static final String KEY_LOGIN_REFRESH_TOKEN = "login_refresh_token";
     private static final boolean DEFAULT_AUTO_ROTATE_IMAGE_ENABLED = true;
     private static final boolean DEFAULT_DARK_THEME_ENABLED = false;
     private static final boolean DEFAULT_SPLIT_ITEMS_ENABLED = false;
@@ -41,6 +43,8 @@ public final class AppSettings {
     private static final String DEFAULT_USERNAME_NICKNAME = "";
     private static final String DEFAULT_LOGIN_EMAIL = "";
     private static final String DEFAULT_LOGIN_PHONE_NUMBER = "";
+    private static final String DEFAULT_LOGIN_ACCESS_TOKEN = "";
+    private static final String DEFAULT_LOGIN_REFRESH_TOKEN = "";
     private static final String JSON_KEY_NAME = "name";
     private static final String JSON_KEY_PHONE = "phone";
 
@@ -147,6 +151,10 @@ public final class AppSettings {
         return getUsernameNickname(context).isEmpty();
     }
 
+    public static boolean isValidUsernameNickname(@Nullable String usernameNickname) {
+        return !normalizeUsernameNickname(usernameNickname).isEmpty();
+    }
+
     public static void clearUsernameNickname(@NonNull Context context) {
         getPreferences(context)
                 .edit()
@@ -213,6 +221,67 @@ public final class AppSettings {
                 .edit()
                 .putString(KEY_LOGIN_PHONE_NUMBER, normalizeWhitespace(phoneNumber))
                 .apply();
+    }
+
+    @NonNull
+    public static String getLoginAccessToken(@NonNull Context context) {
+        String storedValue = getPreferences(context).getString(
+                KEY_LOGIN_ACCESS_TOKEN,
+                DEFAULT_LOGIN_ACCESS_TOKEN
+        );
+        return normalizeWhitespace(storedValue);
+    }
+
+    public static void setLoginAccessToken(
+            @NonNull Context context,
+            @Nullable String accessToken
+    ) {
+        getPreferences(context)
+                .edit()
+                .putString(KEY_LOGIN_ACCESS_TOKEN, normalizeWhitespace(accessToken))
+                .apply();
+    }
+
+    public static void clearLoginAccessToken(@NonNull Context context) {
+        getPreferences(context)
+                .edit()
+                .putString(KEY_LOGIN_ACCESS_TOKEN, DEFAULT_LOGIN_ACCESS_TOKEN)
+                .apply();
+    }
+
+    @NonNull
+    public static String getLoginRefreshToken(@NonNull Context context) {
+        String storedValue = getPreferences(context).getString(
+                KEY_LOGIN_REFRESH_TOKEN,
+                DEFAULT_LOGIN_REFRESH_TOKEN
+        );
+        return normalizeWhitespace(storedValue);
+    }
+
+    public static void setLoginRefreshToken(
+            @NonNull Context context,
+            @Nullable String refreshToken
+    ) {
+        getPreferences(context)
+                .edit()
+                .putString(KEY_LOGIN_REFRESH_TOKEN, normalizeWhitespace(refreshToken))
+                .apply();
+    }
+
+    public static void clearLoginRefreshToken(@NonNull Context context) {
+        getPreferences(context)
+                .edit()
+                .putString(KEY_LOGIN_REFRESH_TOKEN, DEFAULT_LOGIN_REFRESH_TOKEN)
+                .apply();
+    }
+
+    public static boolean isValidPhoneNumber(@Nullable String phoneNumber) {
+        String trimmedPhoneNumber = normalizeWhitespace(phoneNumber);
+        String normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+        if (trimmedPhoneNumber.isEmpty()) {
+            return false;
+        }
+        return normalizedPhoneNumber.matches("^\\+?\\d{6,15}$");
     }
 
     @NonNull

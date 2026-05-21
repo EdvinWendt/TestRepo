@@ -66,14 +66,42 @@
             android:divider="@android:color/transparent"
             android:dividerHeight="8dp" />
 
-        <TextView
-            android:id="@+id/text_history_empty"
+        <LinearLayout
+            android:id="@+id/layout_history_empty_state"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:gravity="center"
+            android:orientation="vertical"
             android:padding="24dp"
-            android:text="@string/history_empty"
-            android:textAppearance="?attr/textAppearanceBodyLarge" />
+            android:visibility="gone">
+
+            <androidx.appcompat.widget.AppCompatImageView
+                android:id="@+id/image_history_empty"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_marginBottom="16dp"
+                android:alpha="0.72"
+                android:contentDescription="@string/history_no_internet"
+                android:tint="?attr/colorOnSurface"
+                android:visibility="gone"
+                app:srcCompat="@drawable/ic_history_no_internet" />
+
+            <TextView
+                android:id="@+id/text_history_empty"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="@string/history_empty"
+                android:textAppearance="?attr/textAppearanceBodyLarge" />
+        </LinearLayout>
+
+        <com.google.android.material.progressindicator.CircularProgressIndicator
+            android:id="@+id/progress_history_loading"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:indeterminate="true"
+            android:visibility="gone" />
     </FrameLayout>
 
 </LinearLayout>

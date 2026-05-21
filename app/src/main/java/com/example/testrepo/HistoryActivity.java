@@ -6,6 +6,9 @@ import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -40,6 +43,7 @@ import androidx.core.widget.TextViewCompat;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.progressindicator.CircularProgressIndicator;
 
 import java.util.ArrayList;
 import java.math.BigDecimal;
@@ -76,6 +80,16 @@ public class HistoryActivity extends AppCompatActivity {
     private final ArrayList<HistoryListItem> visibleHistoryListItems = new ArrayList<>();
     private HistoryEntriesAdapter historyEntriesAdapter;
     private View loadMoreFooterView;
+    @Nullable
+    private View historyEmptyStateView;
+    @Nullable
+    private AppCompatImageView historyEmptyIconView;
+    @Nullable
+    private TextView historyEmptyTextView;
+    @Nullable
+    private CircularProgressIndicator historyLoadingIndicatorView;
+    private boolean showingOfflineEmptyState;
+    private boolean loadingHistoryEntries;
     private int visibleHistoryCount = INITIAL_VISIBLE_HISTORY_COUNT;
 
     @Override
@@ -102,7 +116,12 @@ public class HistoryActivity extends AppCompatActivity {
         historyListView.addFooterView(loadMoreFooterView, null, false);
         historyEntriesAdapter = new HistoryEntriesAdapter();
         historyListView.setAdapter(historyEntriesAdapter);
-        historyListView.setEmptyView(findViewById(R.id.text_history_empty));
+        historyEmptyStateView = findViewById(R.id.layout_history_empty_state);
+        historyEmptyIconView = findViewById(R.id.image_history_empty);
+        historyEmptyTextView = findViewById(R.id.text_history_empty);
+        historyLoadingIndicatorView = findViewById(R.id.progress_history_loading);
+        historyListView.setEmptyView(historyEmptyStateView);
+        showDefaultEmptyState();
         backButton.setOnClickListener(view -> finish());
         settingsMenuButton.setOnClickListener(
                 view -> SettingsMenuHelper.showSettingsMenu(this, view)
@@ -132,10 +151,55 @@ public class HistoryActivity extends AppCompatActivity {
     }
 
     private void loadHistoryEntries() {
-        historyEntries.clear();
-        historyEntries.addAll(ReceiptHistoryStore.loadEntries(this));
-        visibleHistoryCount = INITIAL_VISIBLE_HISTORY_COUNT;
-        refreshVisibleHistoryEntries();
+        loadHistoryEntries(INITIAL_VISIBLE_HISTORY_COUNT);
+    }
+
+    private void loadHistoryEntries(int requestedVisibleCount) {
+        int safeRequestedVisibleCount = Math.max(INITIAL_VISIBLE_HISTORY_COUNT, requestedVisibleCount);
+        showHistoryLoadingState();
+        if (!hasInternetConnection()) {
+            hideHistoryLoadingState();
+            showOfflineEmptyState();
+            historyEntries.clear();
+            visibleHistoryCount = INITIAL_VISIBLE_HISTORY_COUNT;
+            refreshVisibleHistoryEntries();
+            return;
+        }
+
+        showDefaultEmptyState();
+        SupabaseHistoryService.loadEntries(this, new SupabaseHistoryService.LoadEntriesCallback() {
+            @Override
+            public void onSuccess(@NonNull ArrayList<ReceiptHistoryStore.HistoryEntry> entries) {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+
+                hideHistoryLoadingState();
+                showDefaultEmptyState();
+                historyEntries.clear();
+                historyEntries.addAll(entries);
+                visibleHistoryCount = safeRequestedVisibleCount;
+                refreshVisibleHistoryEntries();
+            }
+
+            @Override
+            public void onError(@NonNull String message) {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+
+                hideHistoryLoadingState();
+                if (isOfflineHistoryError(message)) {
+                    showOfflineEmptyState();
+                } else {
+                    showDefaultEmptyState();
+                    Toast.makeText(HistoryActivity.this, message, Toast.LENGTH_SHORT).show();
+                }
+                historyEntries.clear();
+                visibleHistoryCount = INITIAL_VISIBLE_HISTORY_COUNT;
+                refreshVisibleHistoryEntries();
+            }
+        });
     }
 
     private void loadMoreHistoryEntries() {
@@ -183,8 +247,88 @@ public class HistoryActivity extends AppCompatActivity {
             return;
         }
 
+        if (loadingHistoryEntries) {
+            loadMoreFooterView.setVisibility(View.GONE);
+            return;
+        }
+
         boolean hasMoreEntries = visibleHistoryEntries.size() < historyEntries.size();
         loadMoreFooterView.setVisibility(hasMoreEntries ? View.VISIBLE : View.GONE);
+    }
+
+    private void showDefaultEmptyState() {
+        showingOfflineEmptyState = false;
+        updateEmptyStateViews();
+    }
+
+    private void showOfflineEmptyState() {
+        showingOfflineEmptyState = true;
+        updateEmptyStateViews();
+    }
+
+    private void updateEmptyStateViews() {
+        if (historyEmptyStateView == null
+                || historyEmptyIconView == null
+                || historyEmptyTextView == null) {
+            return;
+        }
+
+        if (loadingHistoryEntries) {
+            historyEmptyIconView.setVisibility(View.GONE);
+            historyEmptyTextView.setVisibility(View.GONE);
+            return;
+        }
+
+        historyEmptyIconView.setVisibility(showingOfflineEmptyState ? View.VISIBLE : View.GONE);
+        historyEmptyTextView.setVisibility(View.VISIBLE);
+        historyEmptyTextView.setText(
+                showingOfflineEmptyState
+                        ? R.string.history_no_internet
+                        : R.string.history_empty
+        );
+    }
+
+    private boolean hasInternetConnection() {
+        ConnectivityManager connectivityManager =
+                (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        if (connectivityManager == null) {
+            return false;
+        }
+
+        Network activeNetwork = connectivityManager.getActiveNetwork();
+        if (activeNetwork == null) {
+            return false;
+        }
+
+        NetworkCapabilities networkCapabilities =
+                connectivityManager.getNetworkCapabilities(activeNetwork);
+        return networkCapabilities != null
+                && networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                && networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+    }
+
+    private boolean isOfflineHistoryError(@NonNull String message) {
+        String normalizedMessage = message.trim();
+        return normalizedMessage.equals(getString(R.string.auth_network_error))
+                || normalizedMessage.equals(getString(R.string.history_no_internet));
+    }
+
+    private void showHistoryLoadingState() {
+        loadingHistoryEntries = true;
+        if (historyLoadingIndicatorView != null) {
+            historyLoadingIndicatorView.setVisibility(View.VISIBLE);
+        }
+        updateEmptyStateViews();
+        updateLoadMoreVisibility();
+    }
+
+    private void hideHistoryLoadingState() {
+        loadingHistoryEntries = false;
+        if (historyLoadingIndicatorView != null) {
+            historyLoadingIndicatorView.setVisibility(View.GONE);
+        }
+        updateEmptyStateViews();
+        updateLoadMoreVisibility();
     }
 
     private void showHistoryDetailsDialog(@NonNull ReceiptHistoryStore.HistoryEntry entry) {
@@ -192,6 +336,7 @@ public class HistoryActivity extends AppCompatActivity {
                 .inflate(R.layout.dialog_history_receipt_details, null);
         TextView titleView = dialogView.findViewById(R.id.text_history_receipt_dialog_title);
         TextView messageView = dialogView.findViewById(R.id.text_history_receipt_dialog_message);
+        TextView uuidView = dialogView.findViewById(R.id.text_history_receipt_uuid);
         AppCompatImageButton closeButton =
                 dialogView.findViewById(R.id.button_close_history_receipt);
         LinearLayout participantsLayout =
@@ -212,6 +357,7 @@ public class HistoryActivity extends AppCompatActivity {
         LinearLayout itemsLayout = dialogView.findViewById(R.id.layout_history_receipt_items);
 
         titleView.setText(entry.receiptName);
+        uuidView.setText(getString(R.string.history_receipt_uuid, entry.storageId));
 
         String message = entry.message == null ? "" : entry.message.trim();
         if (entry.isArchiveSummary()) {
@@ -351,7 +497,18 @@ public class HistoryActivity extends AppCompatActivity {
             if (transfer.canPayNow) {
                 payNowButton.setVisibility(View.VISIBLE);
                 payNowButton.setOnClickListener(
-                        view -> openSwishForReceiptHistoryTransfer(entry, transfer)
+                        view -> openSwishForReceiptHistoryTransfer(
+                                entry,
+                                transfer,
+                                () -> {
+                                    bindReceiptHistoryTransfers(
+                                            transfersLayout,
+                                            entry,
+                                            buildReceiptHistoryTransfers(entry)
+                                    );
+                                    historyEntriesAdapter.notifyDataSetChanged();
+                                }
+                        )
                 );
             } else {
                 payNowButton.setVisibility(View.GONE);
@@ -493,7 +650,8 @@ public class HistoryActivity extends AppCompatActivity {
 
     private void openSwishForReceiptHistoryTransfer(
             @NonNull ReceiptHistoryStore.HistoryEntry entry,
-            @NonNull ReceiptHistoryTransfer transfer
+            @NonNull ReceiptHistoryTransfer transfer,
+            @NonNull Runnable onMarkedPaid
     ) {
         String normalizedPhoneNumber =
                 normalizePhoneNumberForSwish(transfer.recipientPhoneNumber);
@@ -521,6 +679,7 @@ public class HistoryActivity extends AppCompatActivity {
                     )
             );
             startActivity(swishIntent);
+            markReceiptHistoryTransferAsPaid(entry, transfer, onMarkedPaid);
         } catch (ActivityNotFoundException | JSONException exception) {
             Toast.makeText(this, R.string.pay_now_open_swish_failed, Toast.LENGTH_SHORT).show();
         }
@@ -564,7 +723,18 @@ public class HistoryActivity extends AppCompatActivity {
             if (transfer.canPayNow) {
                 payNowButton.setVisibility(View.VISIBLE);
                 payNowButton.setOnClickListener(
-                        view -> openSwishForArchiveHistoryTransfer(entry, transfer)
+                        view -> openSwishForArchiveHistoryTransfer(
+                                entry,
+                                transfer,
+                                () -> {
+                                    bindArchiveSummaryHistoryTransfers(
+                                            entry,
+                                            transfersLayout,
+                                            buildArchiveSummaryHistoryTransfers(entry)
+                                    );
+                                    historyEntriesAdapter.notifyDataSetChanged();
+                                }
+                        )
                 );
             } else {
                 payNowButton.setVisibility(View.GONE);
@@ -807,7 +977,8 @@ public class HistoryActivity extends AppCompatActivity {
 
     private void openSwishForArchiveHistoryTransfer(
             @NonNull ReceiptHistoryStore.HistoryEntry entry,
-            @NonNull ArchiveSummaryHistoryTransfer transfer
+            @NonNull ArchiveSummaryHistoryTransfer transfer,
+            @NonNull Runnable onMarkedPaid
     ) {
         String normalizedPhoneNumber =
                 normalizePhoneNumberForSwish(transfer.recipientPhoneNumber);
@@ -835,6 +1006,7 @@ public class HistoryActivity extends AppCompatActivity {
                     )
             );
             startActivity(swishIntent);
+            markArchiveHistoryTransferAsPaid(entry, transfer, onMarkedPaid);
         } catch (ActivityNotFoundException | JSONException exception) {
             Toast.makeText(this, R.string.pay_now_open_swish_failed, Toast.LENGTH_SHORT).show();
         }
@@ -921,14 +1093,28 @@ public class HistoryActivity extends AppCompatActivity {
         if (normalizeWhitespace(transfer.debtorParticipantKey).isEmpty()) {
             return;
         }
-        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.markParticipantPaid(
-                this,
+        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.withParticipantPaidStatus(
                 entry,
                 transfer.debtorParticipantKey,
                 !transfer.hasPaid
         );
-        entry.participants.clear();
-        entry.participants.addAll(updatedEntry.participants);
+        persistUpdatedHistoryEntry(entry, updatedEntry);
+    }
+
+    private void markReceiptHistoryTransferAsPaid(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull ReceiptHistoryTransfer transfer,
+            @NonNull Runnable onPersisted
+    ) {
+        if (normalizeWhitespace(transfer.debtorParticipantKey).isEmpty() || transfer.hasPaid) {
+            return;
+        }
+        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.withParticipantPaidStatus(
+                entry,
+                transfer.debtorParticipantKey,
+                true
+        );
+        persistUpdatedHistoryEntry(entry, updatedEntry, onPersisted);
     }
 
     private void toggleArchiveHistoryTransferPaidState(
@@ -938,14 +1124,28 @@ public class HistoryActivity extends AppCompatActivity {
         if (transfer.sourceItem == null) {
             return;
         }
-        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.markHistoryItemPaid(
-                this,
+        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.withHistoryItemPaidStatus(
                 entry,
                 transfer.sourceItem,
                 !transfer.hasPaid
         );
-        entry.items.clear();
-        entry.items.addAll(updatedEntry.items);
+        persistUpdatedHistoryEntry(entry, updatedEntry);
+    }
+
+    private void markArchiveHistoryTransferAsPaid(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull ArchiveSummaryHistoryTransfer transfer,
+            @NonNull Runnable onPersisted
+    ) {
+        if (transfer.sourceItem == null || transfer.hasPaid) {
+            return;
+        }
+        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.withHistoryItemPaidStatus(
+                entry,
+                transfer.sourceItem,
+                true
+        );
+        persistUpdatedHistoryEntry(entry, updatedEntry, onPersisted);
     }
 
     private void showDeleteHistoryDialog(
@@ -996,15 +1196,25 @@ public class HistoryActivity extends AppCompatActivity {
                 visibleHistoryEntries.size(),
                 INITIAL_VISIBLE_HISTORY_COUNT
         );
-        if (!ReceiptHistoryStore.removeEntry(this, entry)) {
-            Toast.makeText(this, R.string.remove_history_entry_failed, Toast.LENGTH_SHORT).show();
-            return;
-        }
+        SupabaseHistoryService.removeEntry(this, entry, new SupabaseHistoryService.SimpleCallback() {
+            @Override
+            public void onSuccess() {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
 
-        historyEntries.clear();
-        historyEntries.addAll(ReceiptHistoryStore.loadEntries(this));
-        visibleHistoryCount = previousVisibleCount;
-        refreshVisibleHistoryEntries();
+                loadHistoryEntries(previousVisibleCount);
+            }
+
+            @Override
+            public void onError(@NonNull String message) {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+
+                Toast.makeText(HistoryActivity.this, message, Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     private void bindHistoryParticipantButtons(
@@ -1639,15 +1849,61 @@ public class HistoryActivity extends AppCompatActivity {
     private void markDefaultParticipantAsPaid(
             @NonNull ReceiptHistoryStore.HistoryEntry entry
     ) {
-        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.markParticipantPaid(
-                this,
+        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.withParticipantPaidStatus(
                 entry,
                 DEFAULT_PARTICIPANT_KEY,
                 true
         );
+        persistUpdatedHistoryEntry(entry, updatedEntry);
+    }
 
-        entry.participants.clear();
-        entry.participants.addAll(updatedEntry.participants);
+    private void persistUpdatedHistoryEntry(
+            @NonNull ReceiptHistoryStore.HistoryEntry targetEntry,
+            @NonNull ReceiptHistoryStore.HistoryEntry updatedEntry
+    ) {
+        persistUpdatedHistoryEntry(targetEntry, updatedEntry, null);
+    }
+
+    private void persistUpdatedHistoryEntry(
+            @NonNull ReceiptHistoryStore.HistoryEntry targetEntry,
+            @NonNull ReceiptHistoryStore.HistoryEntry updatedEntry,
+            @Nullable Runnable onSaved
+    ) {
+        SupabaseHistoryService.updateEntry(this, updatedEntry, new SupabaseHistoryService.EntryCallback() {
+            @Override
+            public void onSuccess(@NonNull ReceiptHistoryStore.HistoryEntry savedEntry) {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+
+                copyHistoryEntryMutableState(targetEntry, savedEntry);
+                historyEntriesAdapter.notifyDataSetChanged();
+                if (onSaved != null) {
+                    onSaved.run();
+                }
+            }
+
+            @Override
+            public void onError(@NonNull String message) {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+
+                Toast.makeText(HistoryActivity.this, message, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void copyHistoryEntryMutableState(
+            @NonNull ReceiptHistoryStore.HistoryEntry targetEntry,
+            @NonNull ReceiptHistoryStore.HistoryEntry sourceEntry
+    ) {
+        targetEntry.participants.clear();
+        targetEntry.participants.addAll(sourceEntry.participants);
+        targetEntry.items.clear();
+        targetEntry.items.addAll(sourceEntry.items);
+        targetEntry.archivedReceipts.clear();
+        targetEntry.archivedReceipts.addAll(sourceEntry.archivedReceipts);
     }
 
     @NonNull

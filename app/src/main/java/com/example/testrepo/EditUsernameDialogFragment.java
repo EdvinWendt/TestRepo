@@ -48,6 +48,7 @@ public class EditUsernameDialogFragment extends DialogFragment {
         View dialogView = LayoutInflater.from(requireContext())
                 .inflate(R.layout.dialog_edit_username, null);
         TextInputEditText usernameInput = dialogView.findViewById(R.id.input_edit_username);
+        TextInputEditText usernameInputEditText = usernameInput;
         MaterialButton applyButton = dialogView.findViewById(R.id.button_edit_username_confirm);
 
         usernameInput.setText(AppSettings.getUsernameNickname(requireContext()));
@@ -76,15 +77,46 @@ public class EditUsernameDialogFragment extends DialogFragment {
         dialog.setCanceledOnTouchOutside(!requireUsername);
 
         applyButton.setOnClickListener(buttonView -> {
-            AppSettings.setUsernameNickname(
+            String username = usernameInput.getText() == null ? "" : usernameInput.getText().toString();
+            if (!AppSettings.isValidUsernameNickname(username)) {
+                return;
+            }
+
+            applyButton.setEnabled(false);
+            SupabaseAuthService.updateDisplayName(
                     requireContext(),
-                    usernameInput.getText() == null ? "" : usernameInput.getText().toString()
+                    AppSettings.getLoginAccessToken(requireContext()),
+                    username,
+                    new SupabaseAuthService.SimpleCallback() {
+                        @Override
+                        public void onSuccess() {
+                            if (!isAdded()) {
+                                return;
+                            }
+
+                            AppSettings.setUsernameNickname(requireContext(), username);
+                            Bundle result = new Bundle();
+                            result.putBoolean(RESULT_KEY_REQUIRED_USERNAME, requireUsername);
+                            getParentFragmentManager().setFragmentResult(REQUEST_KEY, result);
+                            dismiss();
+                            Toast.makeText(
+                                    requireContext(),
+                                    R.string.username_changed,
+                                    Toast.LENGTH_SHORT
+                            ).show();
+                        }
+
+                        @Override
+                        public void onError(@NonNull String message) {
+                            if (!isAdded()) {
+                                return;
+                            }
+
+                            applyButton.setEnabled(hasUsernameText(usernameInputEditText.getText()));
+                            Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show();
+                        }
+                    }
             );
-            Bundle result = new Bundle();
-            result.putBoolean(RESULT_KEY_REQUIRED_USERNAME, requireUsername);
-            getParentFragmentManager().setFragmentResult(REQUEST_KEY, result);
-            dismiss();
-            Toast.makeText(requireContext(), R.string.username_changed, Toast.LENGTH_SHORT).show();
         });
 
         return dialog;
@@ -96,6 +128,6 @@ public class EditUsernameDialogFragment extends DialogFragment {
     }
 
     private boolean hasUsernameText(@Nullable Editable editable) {
-        return editable != null && editable.toString().trim().length() > 0;
+        return editable != null && AppSettings.isValidUsernameNickname(editable.toString());
     }
 }

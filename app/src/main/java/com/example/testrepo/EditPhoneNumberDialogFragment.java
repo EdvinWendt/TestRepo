@@ -38,6 +38,7 @@ public class EditPhoneNumberDialogFragment extends DialogFragment {
                 .inflate(R.layout.dialog_edit_phone_number, null);
         TextInputLayout phoneInputLayout = dialogView.findViewById(R.id.input_layout_edit_phone_number);
         TextInputEditText phoneInput = dialogView.findViewById(R.id.input_edit_phone_number);
+        TextInputEditText phoneInputEditText = phoneInput;
         MaterialButton applyButton = dialogView.findViewById(R.id.button_edit_phone_number_confirm);
 
         phoneInput.setText(AppSettings.getLoginPhoneNumber(requireContext()));
@@ -77,28 +78,47 @@ public class EditPhoneNumberDialogFragment extends DialogFragment {
                 return;
             }
 
-            AppSettings.setLoginPhoneNumber(
+            String phoneNumber = phoneEditable == null ? "" : phoneEditable.toString();
+            applyButton.setEnabled(false);
+            SupabaseAuthService.updateProfile(
                     requireContext(),
-                    phoneEditable == null ? "" : phoneEditable.toString()
+                    AppSettings.getLoginAccessToken(requireContext()),
+                    AppSettings.getUsernameNickname(requireContext()),
+                    phoneNumber,
+                    new SupabaseAuthService.SimpleCallback() {
+                        @Override
+                        public void onSuccess() {
+                            if (!isAdded()) {
+                                return;
+                            }
+
+                            AppSettings.setLoginPhoneNumber(requireContext(), phoneNumber);
+                            getParentFragmentManager().setFragmentResult(REQUEST_KEY, Bundle.EMPTY);
+                            dismiss();
+                            Toast.makeText(
+                                    requireContext(),
+                                    R.string.phone_number_changed,
+                                    Toast.LENGTH_SHORT
+                            ).show();
+                        }
+
+                        @Override
+                        public void onError(@NonNull String message) {
+                            if (!isAdded()) {
+                                return;
+                            }
+
+                            applyButton.setEnabled(isValidPhoneNumber(phoneInputEditText.getText()));
+                            Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show();
+                        }
+                    }
             );
-            getParentFragmentManager().setFragmentResult(REQUEST_KEY, Bundle.EMPTY);
-            dismiss();
-            Toast.makeText(requireContext(), R.string.phone_number_changed, Toast.LENGTH_SHORT).show();
         });
 
         return dialog;
     }
 
     private boolean isValidPhoneNumber(@Nullable Editable editable) {
-        if (editable == null) {
-            return false;
-        }
-
-        String trimmedPhoneNumber = editable.toString().trim();
-        String normalizedPhoneNumber = trimmedPhoneNumber.replaceAll("[^+\\d]", "");
-        if (trimmedPhoneNumber.isEmpty()) {
-            return false;
-        }
-        return normalizedPhoneNumber.matches("^\\+?\\d{6,15}$");
+        return editable != null && AppSettings.isValidPhoneNumber(editable.toString());
     }
 }

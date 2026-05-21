@@ -81,6 +81,7 @@ public class ManagePermissionsDialogFragment extends DialogFragment {
         manageSmsButton.setOnClickListener(
                 buttonView -> managePermission(Manifest.permission.SEND_SMS)
         );
+        manageSmsButton.setEnabled(DeviceCapabilityHelper.supportsSms(requireContext()));
         updatePermissionDescriptions();
     }
 
@@ -103,6 +104,10 @@ public class ManagePermissionsDialogFragment extends DialogFragment {
     }
 
     private void managePermission(@NonNull String permission) {
+        if (Manifest.permission.SEND_SMS.equals(permission)
+                && !DeviceCapabilityHelper.supportsSms(requireContext())) {
+            return;
+        }
         if (ContextCompat.checkSelfPermission(requireContext(), permission)
                 == PackageManager.PERMISSION_GRANTED) {
             openAppSettings();
@@ -136,9 +141,9 @@ public class ManagePermissionsDialogFragment extends DialogFragment {
             );
         }
         if (smsDescriptionView != null) {
-            smsDescriptionView.setText(
-                    getPermissionAccessLabel(Manifest.permission.SEND_SMS)
-            );
+            smsDescriptionView.setText(DeviceCapabilityHelper.supportsSms(requireContext())
+                    ? getPermissionAccessLabel(Manifest.permission.SEND_SMS)
+                    : getString(R.string.permission_access_not_available));
         }
     }
 

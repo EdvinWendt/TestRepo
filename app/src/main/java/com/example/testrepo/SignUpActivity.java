@@ -33,12 +33,10 @@ public class SignUpActivity extends AppCompatActivity {
 
         AppCompatImageButton backButton = findViewById(R.id.button_sign_up_back);
         TextInputLayout emailInputLayout = findViewById(R.id.input_layout_sign_up_email);
-        TextInputLayout usernameInputLayout = findViewById(R.id.input_layout_sign_up_username);
         TextInputLayout passwordInputLayout = findViewById(R.id.input_layout_sign_up_password);
         TextInputLayout confirmPasswordInputLayout =
                 findViewById(R.id.input_layout_sign_up_confirm_password);
         TextInputEditText emailInputView = findViewById(R.id.edit_sign_up_email);
-        TextInputEditText usernameInputView = findViewById(R.id.edit_sign_up_username);
         TextInputEditText passwordInputView = findViewById(R.id.edit_sign_up_password);
         TextInputEditText confirmPasswordInputView =
                 findViewById(R.id.edit_sign_up_confirm_password);
@@ -47,11 +45,9 @@ public class SignUpActivity extends AppCompatActivity {
         backButton.setOnClickListener(view -> finish());
         signUpButton.setOnClickListener(view -> attemptCreateAccount(
                 emailInputLayout,
-                usernameInputLayout,
                 passwordInputLayout,
                 confirmPasswordInputLayout,
                 emailInputView,
-                usernameInputView,
                 passwordInputView,
                 confirmPasswordInputView,
                 signUpButton
@@ -75,22 +71,18 @@ public class SignUpActivity extends AppCompatActivity {
 
     private void attemptCreateAccount(
             @NonNull TextInputLayout emailInputLayout,
-            @NonNull TextInputLayout usernameInputLayout,
             @NonNull TextInputLayout passwordInputLayout,
             @NonNull TextInputLayout confirmPasswordInputLayout,
             @NonNull TextInputEditText emailInputView,
-            @NonNull TextInputEditText usernameInputView,
             @NonNull TextInputEditText passwordInputView,
             @NonNull TextInputEditText confirmPasswordInputView,
             @NonNull MaterialButton signUpButton
     ) {
         String email = getText(emailInputView);
-        String username = getText(usernameInputView);
         String password = getText(passwordInputView);
         String confirmPassword = getText(confirmPasswordInputView);
 
         emailInputLayout.setError(null);
-        usernameInputLayout.setError(null);
         passwordInputLayout.setError(null);
         confirmPasswordInputLayout.setError(null);
 
@@ -100,11 +92,6 @@ public class SignUpActivity extends AppCompatActivity {
             hasError = true;
         } else if (!Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
             emailInputLayout.setError(getString(R.string.login_email_invalid));
-            hasError = true;
-        }
-
-        if (username.isEmpty()) {
-            usernameInputLayout.setError(getString(R.string.sign_up_username_required));
             hasError = true;
         }
 
@@ -138,14 +125,21 @@ public class SignUpActivity extends AppCompatActivity {
                 signUpButton.setEnabled(true);
                 signUpButton.setText(R.string.login_sign_up);
                 if (authResponse.signedIn) {
-                    AppSettings.setUsernameNickname(SignUpActivity.this, username);
+                    AppSettings.clearUsernameNickname(SignUpActivity.this);
+                    AppSettings.setLoginAccessToken(SignUpActivity.this, authResponse.accessToken);
+                    AppSettings.setLoginRefreshToken(
+                            SignUpActivity.this,
+                            authResponse.refreshToken
+                    );
                     AppSettings.setLoginEmail(SignUpActivity.this, email);
                     AppSettings.setLoginCompleted(SignUpActivity.this, true);
                     openMainView();
                     return;
                 }
 
-                AppSettings.setUsernameNickname(SignUpActivity.this, username);
+                AppSettings.clearUsernameNickname(SignUpActivity.this);
+                AppSettings.clearLoginAccessToken(SignUpActivity.this);
+                AppSettings.clearLoginRefreshToken(SignUpActivity.this);
                 startActivity(ConfirmSignUpActivity.createIntent(SignUpActivity.this, email));
                 finish();
             }

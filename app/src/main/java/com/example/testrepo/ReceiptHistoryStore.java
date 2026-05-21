@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -11,6 +12,8 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 final class ReceiptHistoryStore {
     static final String ENTRY_TYPE_RECEIPT = "receipt";
@@ -69,28 +72,16 @@ final class ReceiptHistoryStore {
             boolean hasPaid
     ) {
         ArrayList<HistoryEntry> entries = loadEntries(context);
-        for (int index = 0; index < entries.size(); index++) {
-            HistoryEntry existingEntry = entries.get(index);
-            if (!existingEntry.matches(targetEntry)) {
-                continue;
-            }
+            for (int index = 0; index < entries.size(); index++) {
+                HistoryEntry existingEntry = entries.get(index);
+                if (!existingEntry.matches(targetEntry)) {
+                    continue;
+                }
 
-            ArrayList<ParticipantShare> updatedParticipants = new ArrayList<>();
-            for (ParticipantShare participant : existingEntry.participants) {
-                updatedParticipants.add(participant.key.equals(participantKey)
-                        ? participant.copyWithPaidStatus(hasPaid)
-                        : participant);
-            }
-
-            HistoryEntry updatedEntry = new HistoryEntry(
-                    existingEntry.receiptName,
-                    existingEntry.totalAmount,
-                    existingEntry.sentDate,
-                    existingEntry.message,
-                    updatedParticipants,
-                    existingEntry.items,
-                    existingEntry.entryType,
-                    existingEntry.archivedReceipts
+            HistoryEntry updatedEntry = withParticipantPaidStatus(
+                    existingEntry,
+                    participantKey,
+                    hasPaid
             );
             entries.set(index, updatedEntry);
             saveEntries(context, entries);
@@ -108,32 +99,16 @@ final class ReceiptHistoryStore {
             boolean hasPaid
     ) {
         ArrayList<HistoryEntry> entries = loadEntries(context);
-        for (int entryIndex = 0; entryIndex < entries.size(); entryIndex++) {
-            HistoryEntry existingEntry = entries.get(entryIndex);
-            if (!existingEntry.matches(targetEntry)) {
-                continue;
-            }
-
-            ArrayList<HistoryItem> updatedItems = new ArrayList<>();
-            boolean itemUpdated = false;
-            for (HistoryItem item : existingEntry.items) {
-                if (!itemUpdated && item.matches(targetItem)) {
-                    updatedItems.add(item.copyWithPaidStatus(hasPaid));
-                    itemUpdated = true;
-                } else {
-                    updatedItems.add(item);
+            for (int entryIndex = 0; entryIndex < entries.size(); entryIndex++) {
+                HistoryEntry existingEntry = entries.get(entryIndex);
+                if (!existingEntry.matches(targetEntry)) {
+                    continue;
                 }
-            }
 
-            HistoryEntry updatedEntry = new HistoryEntry(
-                    existingEntry.receiptName,
-                    existingEntry.totalAmount,
-                    existingEntry.sentDate,
-                    existingEntry.message,
-                    existingEntry.participants,
-                    updatedItems,
-                    existingEntry.entryType,
-                    existingEntry.archivedReceipts
+            HistoryEntry updatedEntry = withHistoryItemPaidStatus(
+                    existingEntry,
+                    targetItem,
+                    hasPaid
             );
             entries.set(entryIndex, updatedEntry);
             saveEntries(context, entries);
@@ -187,11 +162,119 @@ final class ReceiptHistoryStore {
     }
 
     @NonNull
+    static HistoryEntry withParticipantPaidStatus(
+            @NonNull HistoryEntry sourceEntry,
+            @NonNull String participantKey,
+            boolean hasPaid
+    ) {
+        ArrayList<ParticipantShare> updatedParticipants = new ArrayList<>();
+        for (ParticipantShare participant : sourceEntry.participants) {
+            updatedParticipants.add(participant.key.equals(participantKey)
+                    ? participant.copyWithPaidStatus(hasPaid)
+                    : participant);
+        }
+
+        return new HistoryEntry(
+                sourceEntry.receiptName,
+                sourceEntry.totalAmount,
+                sourceEntry.sentDate,
+                sourceEntry.message,
+                updatedParticipants,
+                sourceEntry.items,
+                sourceEntry.entryType,
+                sourceEntry.archivedReceipts,
+                sourceEntry.storageId
+        );
+    }
+
+    @NonNull
+    static HistoryEntry withHistoryItemPaidStatus(
+            @NonNull HistoryEntry sourceEntry,
+            @NonNull HistoryItem targetItem,
+            boolean hasPaid
+    ) {
+        ArrayList<HistoryItem> updatedItems = new ArrayList<>();
+        boolean itemUpdated = false;
+        for (HistoryItem item : sourceEntry.items) {
+            if (!itemUpdated && item.matches(targetItem)) {
+                updatedItems.add(item.copyWithPaidStatus(hasPaid));
+                itemUpdated = true;
+            } else {
+                updatedItems.add(item);
+            }
+        }
+
+        return new HistoryEntry(
+                sourceEntry.receiptName,
+                sourceEntry.totalAmount,
+                sourceEntry.sentDate,
+                sourceEntry.message,
+                sourceEntry.participants,
+                updatedItems,
+                sourceEntry.entryType,
+                sourceEntry.archivedReceipts,
+                sourceEntry.storageId
+        );
+    }
+
+    @NonNull
     private static SharedPreferences getPreferences(@NonNull Context context) {
-        return context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
+        SharedPreferences accountPreferences = context.getSharedPreferences(
+                getPreferencesNameForCurrentUser(context),
+                Context.MODE_PRIVATE
+        );
+        migrateLegacyPreferencesIfNeeded(context, accountPreferences);
+        return accountPreferences;
+    }
+
+    @NonNull
+    private static String getPreferencesNameForCurrentUser(@NonNull Context context) {
+        String normalizedEmail = AppSettings.getLoginEmail(context)
+                .trim()
+                .toLowerCase(Locale.US)
+                .replaceAll("[^a-z0-9@._-]", "_");
+        if (normalizedEmail.isEmpty()) {
+            normalizedEmail = "signed_out";
+        }
+        return PREFERENCES_NAME + "_" + normalizedEmail;
+    }
+
+    private static void migrateLegacyPreferencesIfNeeded(
+            @NonNull Context context,
+            @NonNull SharedPreferences accountPreferences
+    ) {
+        if (!accountPreferences.getAll().isEmpty()) {
+            return;
+        }
+
+        SharedPreferences legacyPreferences =
+                context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
+        Map<String, ?> legacyEntries = legacyPreferences.getAll();
+        if (legacyEntries.isEmpty()) {
+            return;
+        }
+
+        SharedPreferences.Editor accountEditor = accountPreferences.edit();
+        boolean copiedAnyValue = false;
+        for (Map.Entry<String, ?> entry : legacyEntries.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String) {
+                accountEditor.putString(entry.getKey(), (String) value);
+                copiedAnyValue = true;
+            }
+        }
+
+        if (!copiedAnyValue) {
+            return;
+        }
+
+        accountEditor.apply();
+        legacyPreferences.edit().clear().apply();
     }
 
     static final class HistoryEntry {
+        @NonNull
+        final String storageId;
         final String entryType;
         final String receiptName;
         final String totalAmount;
@@ -217,7 +300,8 @@ final class ReceiptHistoryStore {
                     participants,
                     items,
                     ENTRY_TYPE_RECEIPT,
-                    new ArrayList<>()
+                    new ArrayList<>(),
+                    ""
             );
         }
 
@@ -238,7 +322,8 @@ final class ReceiptHistoryStore {
                     participants,
                     items,
                     entryType,
-                    new ArrayList<>()
+                    new ArrayList<>(),
+                    ""
             );
         }
 
@@ -252,6 +337,31 @@ final class ReceiptHistoryStore {
                 @NonNull String entryType,
                 @NonNull List<HistoryEntry> archivedReceipts
         ) {
+            this(
+                    receiptName,
+                    totalAmount,
+                    sentDate,
+                    message,
+                    participants,
+                    items,
+                    entryType,
+                    archivedReceipts,
+                    ""
+            );
+        }
+
+        HistoryEntry(
+                @NonNull String receiptName,
+                @NonNull String totalAmount,
+                @NonNull String sentDate,
+                @NonNull String message,
+                @NonNull List<ParticipantShare> participants,
+                @NonNull List<HistoryItem> items,
+                @NonNull String entryType,
+                @NonNull List<HistoryEntry> archivedReceipts,
+                @Nullable String storageId
+        ) {
+            this.storageId = storageId == null ? "" : storageId.trim();
             this.entryType = entryType;
             this.receiptName = receiptName;
             this.totalAmount = totalAmount;
@@ -340,7 +450,23 @@ final class ReceiptHistoryStore {
                     participants,
                     items,
                     object.optString(KEY_ENTRY_TYPE, ENTRY_TYPE_RECEIPT),
-                    archivedReceipts
+                    archivedReceipts,
+                    ""
+            );
+        }
+
+        @NonNull
+        HistoryEntry copyWithStorageId(@Nullable String storageId) {
+            return new HistoryEntry(
+                    receiptName,
+                    totalAmount,
+                    sentDate,
+                    message,
+                    participants,
+                    items,
+                    entryType,
+                    archivedReceipts,
+                    storageId
             );
         }
 

@@ -2,6 +2,7 @@ package com.example.testrepo;
 
 import android.Manifest;
 import android.content.ClipData;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -19,6 +20,7 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.pdf.PdfRenderer;
 import android.media.ExifInterface;
+import android.net.ConnectivityManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -239,6 +241,8 @@ public class NewReceiptActivity extends AppCompatActivity {
     private PopupWindow headerHelpPopup;
     @Nullable
     private PopupWindow receiptItemPayerPopup;
+    @Nullable
+    private PopupWindow sendRequestsNoInternetPopup;
     private final SharedPreferences.OnSharedPreferenceChangeListener settingsChangeListener =
             (sharedPreferences, key) -> {
                 if (AppSettings.isSplitItemsPreferenceKey(key) && !trackedReceiptItems.isEmpty()) {
@@ -4102,6 +4106,10 @@ public class NewReceiptActivity extends AppCompatActivity {
                 dialogView.findViewById(R.id.edit_receipt_summary_receipt_name);
         View closeButton = dialogView.findViewById(R.id.button_close_receipt_summary);
         MaterialButton sendRequestsButton = dialogView.findViewById(R.id.button_send_requests);
+        AppCompatImageButton sendRequestsNoInternetInfoButton =
+                dialogView.findViewById(R.id.button_send_requests_no_internet_info);
+        final ConnectivityManager.NetworkCallback[] networkCallbackHolder =
+                new ConnectivityManager.NetworkCallback[1];
 
         ArrayList<ReceiptSummaryTransfer> transfers = buildReceiptSummaryTransfers();
         boolean hasPendingPayments = !transfers.isEmpty();
@@ -4148,16 +4156,21 @@ public class NewReceiptActivity extends AppCompatActivity {
             @Override
             public void afterTextChanged(Editable s) {
                 receiptNameInputLayout.setError(null);
-                sendRequestsButton.setEnabled(
-                        hasPendingPayments
-                                && isValidReceiptSummaryName(getText(receiptNameInputView))
+                updateReceiptSummarySendRequestsUi(
+                        sendRequestsButton,
+                        sendRequestsNoInternetInfoButton,
+                        hasPendingPayments,
+                        receiptNameInputView
                 );
             }
         });
         receiptNameInputLayout.setEnabled(hasPendingPayments);
         receiptNameInputView.setEnabled(hasPendingPayments);
-        sendRequestsButton.setEnabled(
-                hasPendingPayments && isValidReceiptSummaryName(getText(receiptNameInputView))
+        updateReceiptSummarySendRequestsUi(
+                sendRequestsButton,
+                sendRequestsNoInternetInfoButton,
+                hasPendingPayments,
+                receiptNameInputView
         );
 
         Dialog dialog = new Dialog(this, AppSettings.getFullScreenDialogThemeResId(this)) {
@@ -4176,9 +4189,47 @@ public class NewReceiptActivity extends AppCompatActivity {
         };
         dialog.setContentView(dialogView);
         dialog.setCancelable(true);
-        closeButton.setOnClickListener(view -> dialog.dismiss());
+        closeButton.setOnClickListener(view -> {
+            dismissSendRequestsNoInternetPopup();
+            dialog.dismiss();
+        });
+        sendRequestsNoInternetInfoButton.setOnClickListener(
+                view -> showSendRequestsNoInternetPopup(sendRequestsNoInternetInfoButton)
+        );
+        dialog.setOnDismissListener(dialogInterface -> {
+            dismissSendRequestsNoInternetPopup();
+            NetworkStateHelper.unregisterNetworkCallback(
+                    NewReceiptActivity.this,
+                    networkCallbackHolder[0]
+            );
+        });
+        networkCallbackHolder[0] = NetworkStateHelper.registerDefaultNetworkCallback(
+                this,
+                () -> runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || !dialog.isShowing()) {
+                        return;
+                    }
+
+                    updateReceiptSummarySendRequestsUi(
+                            sendRequestsButton,
+                            sendRequestsNoInternetInfoButton,
+                            hasPendingPayments,
+                            receiptNameInputView
+                    );
+                })
+        );
 
         sendRequestsButton.setOnClickListener(view -> {
+            if (!NetworkStateHelper.hasInternetConnection(this)) {
+                updateReceiptSummarySendRequestsUi(
+                        sendRequestsButton,
+                        sendRequestsNoInternetInfoButton,
+                        hasPendingPayments,
+                        receiptNameInputView
+                );
+                return;
+            }
+
             String receiptName = getText(receiptNameInputView);
             if (!validateReceiptSummaryName(receiptNameInputLayout, receiptNameInputView)) {
                 return;
@@ -4579,8 +4630,105 @@ public class NewReceiptActivity extends AppCompatActivity {
         confirmationDialog.show();
     }
 
+    private void updateReceiptSummarySendRequestsUi(
+            @NonNull MaterialButton sendRequestsButton,
+            @NonNull AppCompatImageButton sendRequestsNoInternetInfoButton,
+            boolean hasPendingPayments,
+            @NonNull TextInputEditText receiptNameInputView
+    ) {
+        boolean hasInternetConnection = NetworkStateHelper.hasInternetConnection(this);
+        sendRequestsButton.setEnabled(
+                hasPendingPayments
+                        && isValidReceiptSummaryName(getText(receiptNameInputView))
+                        && hasInternetConnection
+        );
+        sendRequestsNoInternetInfoButton.setVisibility(
+                hasInternetConnection ? View.GONE : View.VISIBLE
+        );
+        if (hasInternetConnection) {
+            dismissSendRequestsNoInternetPopup();
+        }
+    }
+
+    private void showSendRequestsNoInternetPopup(@NonNull View anchorView) {
+        if (sendRequestsNoInternetPopup != null && sendRequestsNoInternetPopup.isShowing()) {
+            dismissSendRequestsNoInternetPopup();
+            return;
+        }
+
+        View popupView = getLayoutInflater().inflate(
+                R.layout.popup_header_help_message,
+                null
+        );
+        TextView messageView = popupView.findViewById(R.id.text_header_help_message);
+        messageView.setText(R.string.history_no_internet);
+
+        popupView.measure(
+                View.MeasureSpec.makeMeasureSpec(dpToPx(240), View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        );
+
+        PopupWindow popupWindow = new PopupWindow(
+                popupView,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                true
+        );
+        popupWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        popupWindow.setOutsideTouchable(true);
+        popupWindow.setElevation(dpToPx(10));
+        popupWindow.setOnDismissListener(() -> {
+            if (sendRequestsNoInternetPopup == popupWindow) {
+                sendRequestsNoInternetPopup = null;
+            }
+        });
+
+        Rect anchorBounds = new Rect();
+        anchorView.getGlobalVisibleRect(anchorBounds);
+        Rect visibleFrame = new Rect();
+        anchorView.getWindowVisibleDisplayFrame(visibleFrame);
+        int popupWidth = popupView.getMeasuredWidth();
+        int popupHeight = popupView.getMeasuredHeight();
+        int popupX = clamp(
+                anchorBounds.right - popupWidth,
+                visibleFrame.left,
+                Math.max(visibleFrame.left, visibleFrame.right - popupWidth)
+        );
+        int popupY = clamp(
+                anchorBounds.top - popupHeight - dpToPx(8),
+                visibleFrame.top,
+                Math.max(visibleFrame.top, visibleFrame.bottom - popupHeight)
+        );
+
+        popupWindow.showAtLocation(
+                anchorView.getRootView(),
+                Gravity.TOP | Gravity.START,
+                popupX,
+                popupY
+        );
+        sendRequestsNoInternetPopup = popupWindow;
+    }
+
+    private void dismissSendRequestsNoInternetPopup() {
+        if (sendRequestsNoInternetPopup == null) {
+            return;
+        }
+
+        sendRequestsNoInternetPopup.dismiss();
+        sendRequestsNoInternetPopup = null;
+    }
+
     private void openSendRequestsFlow(@NonNull String customMessage) {
         pendingSendRequestsMessage = customMessage.trim();
+        if (!DeviceCapabilityHelper.supportsSms(this)) {
+            pendingSendRequestsMessage = "";
+            Toast.makeText(
+                    this,
+                    R.string.send_requests_not_supported,
+                    Toast.LENGTH_SHORT
+            ).show();
+            return;
+        }
         if (!hasSendSmsPermission()) {
             sendRequestsAfterSmsPermission = true;
             requestSendSmsPermissionLauncher.launch(Manifest.permission.SEND_SMS);
@@ -4740,14 +4888,54 @@ public class NewReceiptActivity extends AppCompatActivity {
     }
 
     private void sendParticipantPaymentRequests() {
+        if (!DeviceCapabilityHelper.supportsSms(this)) {
+            pendingSendRequestsMessage = "";
+            Toast.makeText(
+                    this,
+                    R.string.send_requests_not_supported,
+                    Toast.LENGTH_SHORT
+            ).show();
+            return;
+        }
         String customMessage = pendingSendRequestsMessage;
         pendingSendRequestsMessage = "";
-        SmsManager smsManager = SmsManager.getDefault();
-        int sentCount = 0;
-        int skippedCount = 0;
         String receiptName = getCurrentReceiptName();
         ReceiptHistoryStore.HistoryEntry historyEntry = buildCurrentReceiptHistoryEntry(customMessage);
         ArrayList<ReceiptSummaryTransfer> transfers = buildReceiptSummaryTransfers();
+
+        saveReceiptHistoryEntry(
+                historyEntry,
+                new SupabaseHistoryService.EntryCallback() {
+                    @Override
+                    public void onSuccess(@NonNull ReceiptHistoryStore.HistoryEntry savedHistoryEntry) {
+                        sendParticipantPaymentRequestsWithHistoryId(
+                                savedHistoryEntry,
+                                receiptName,
+                                transfers
+                        );
+                    }
+
+                    @Override
+                    public void onError(@NonNull String message) {
+                        Toast.makeText(
+                                NewReceiptActivity.this,
+                                message,
+                                Toast.LENGTH_SHORT
+                        ).show();
+                    }
+                }
+        );
+    }
+
+    private void sendParticipantPaymentRequestsWithHistoryId(
+            @NonNull ReceiptHistoryStore.HistoryEntry savedHistoryEntry,
+            @NonNull String receiptName,
+            @NonNull ArrayList<ReceiptSummaryTransfer> transfers
+    ) {
+        String requestId = getHistoryEntryShortId(savedHistoryEntry);
+        SmsManager smsManager = SmsManager.getDefault();
+        int sentCount = 0;
+        int skippedCount = 0;
 
         for (Participant participant : participants) {
             if (isDefaultParticipant(participant)) {
@@ -4763,7 +4951,8 @@ public class NewReceiptActivity extends AppCompatActivity {
             String message = buildParticipantPaymentRequestMessage(
                     participant,
                     receiptName,
-                    transfers
+                    transfers,
+                    requestId
             );
 
             try {
@@ -4786,12 +4975,11 @@ public class NewReceiptActivity extends AppCompatActivity {
         }
 
         if (sentCount == 0) {
+            removeReceiptHistoryEntrySilently(savedHistoryEntry);
             Toast.makeText(this, R.string.send_requests_none, Toast.LENGTH_SHORT).show();
             returnToMainMenu();
             return;
         }
-
-        saveReceiptHistoryEntry(historyEntry);
 
         int messageResId = skippedCount == 0
                 ? R.string.send_requests_success
@@ -4808,7 +4996,8 @@ public class NewReceiptActivity extends AppCompatActivity {
     private String buildParticipantPaymentRequestMessage(
             @NonNull Participant participant,
             @NonNull String receiptName,
-            @NonNull ArrayList<ReceiptSummaryTransfer> transfers
+            @NonNull ArrayList<ReceiptSummaryTransfer> transfers,
+            @NonNull String requestId
     ) {
         ArrayList<ParticipantPaymentRequestLine> outgoingLines = new ArrayList<>();
         ArrayList<ParticipantPaymentRequestLine> incomingLines = new ArrayList<>();
@@ -4822,7 +5011,8 @@ public class NewReceiptActivity extends AppCompatActivity {
                         buildPaymentRequestUrlOrNull(
                                 resolveParticipantPaymentLinkPhoneNumber(payeeParticipant),
                                 transfer.amount,
-                                receiptName
+                                receiptName,
+                                requestId
                         )
                 ));
             } else if (transfer.toParticipant.key.equals(participant.key)) {
@@ -4905,12 +5095,13 @@ public class NewReceiptActivity extends AppCompatActivity {
     private String buildPaymentRequestUrlOrNull(
             @NonNull String phoneNumber,
             @NonNull BigDecimal amount,
-            @NonNull String message
+            @NonNull String message,
+            @NonNull String requestId
     ) {
         if (!isValidPhoneNumber(phoneNumber)) {
             return null;
         }
-        return buildPaymentRequestUrl(phoneNumber, amount, message);
+        return buildPaymentRequestUrl(phoneNumber, amount, message, requestId);
     }
 
     @NonNull
@@ -4950,15 +5141,49 @@ public class NewReceiptActivity extends AppCompatActivity {
     private String buildPaymentRequestUrl(
             @NonNull String phoneNumber,
             @NonNull BigDecimal amount,
-            @NonNull String message
+            @NonNull String message,
+            @NonNull String requestId
     ) {
-        return Uri.parse(PAYMENT_LINK_BASE_URL)
+        Uri.Builder builder = Uri.parse(PAYMENT_LINK_BASE_URL)
                 .buildUpon()
                 .appendQueryParameter("Phone", normalizePhoneNumber(phoneNumber))
                 .appendQueryParameter("Amount", formatUrlAmount(amount))
-                .appendQueryParameter("Message", message)
-                .build()
-                .toString();
+                .appendQueryParameter("Message", message);
+        if (!requestId.isEmpty()) {
+            builder.appendQueryParameter("ID", requestId);
+        }
+        return builder.build().toString();
+    }
+
+    @NonNull
+    private String getHistoryEntryShortId(@NonNull ReceiptHistoryStore.HistoryEntry historyEntry) {
+        String storageId = normalizeWhitespace(historyEntry.storageId);
+        if (storageId.isEmpty()) {
+            return "";
+        }
+        return storageId.substring(0, Math.min(8, storageId.length()));
+    }
+
+    private void removeReceiptHistoryEntrySilently(
+            @NonNull ReceiptHistoryStore.HistoryEntry historyEntry
+    ) {
+        if (historyEntry.storageId.isEmpty()) {
+            return;
+        }
+
+        SupabaseHistoryService.removeEntry(
+                getApplicationContext(),
+                historyEntry,
+                new SupabaseHistoryService.SimpleCallback() {
+                    @Override
+                    public void onSuccess() {
+                    }
+
+                    @Override
+                    public void onError(@NonNull String message) {
+                    }
+                }
+        );
     }
 
     @NonNull
@@ -5187,8 +5412,15 @@ public class NewReceiptActivity extends AppCompatActivity {
         );
     }
 
-    private void saveReceiptHistoryEntry(@NonNull ReceiptHistoryStore.HistoryEntry historyEntry) {
-        ReceiptHistoryStore.saveEntry(this, historyEntry);
+    private void saveReceiptHistoryEntry(
+            @NonNull ReceiptHistoryStore.HistoryEntry historyEntry,
+            @NonNull SupabaseHistoryService.EntryCallback callback
+    ) {
+        SupabaseHistoryService.saveEntry(
+                getApplicationContext(),
+                historyEntry,
+                callback
+        );
     }
 
     @NonNull
@@ -5835,6 +6067,7 @@ public class NewReceiptActivity extends AppCompatActivity {
         dismissNewArchiveCreateDisabledReasonsPopup();
         dismissHeaderHelpPopup();
         dismissReceiptItemPayerPopup();
+        dismissSendRequestsNoInternetPopup();
         super.onDestroy();
         if (textRecognizer != null) {
             textRecognizer.close();

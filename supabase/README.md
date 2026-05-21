@@ -5,6 +5,7 @@ This project now includes a first-pass Supabase schema for:
 - user profiles
 - archives
 - receipts
+- history entries
 - receipt participants
 - receipt items
 - item-to-participant assignments

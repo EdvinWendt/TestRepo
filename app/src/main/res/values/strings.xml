@@ -23,7 +23,6 @@
     <string name="login_failed_invalid_credentials">Email or password is incorrect.</string>
     <string name="sign_up_heading">Create your account</string>
     <string name="sign_up_confirm_password_label">Confirm Password</string>
-    <string name="sign_up_username_required">Enter a username.</string>
     <string name="sign_up_confirm_password_required">Confirm your password.</string>
     <string name="sign_up_password_mismatch">Passwords do not match.</string>
     <string name="sign_up_creating_account">Creating Account...</string>
@@ -31,9 +30,16 @@
     <string name="sign_up_failed_generic">Unable to create account.</string>
     <string name="confirm_sign_up_message">An email has been sent to %1$s. Follow the instructions to confirm your new Kvitt account.</string>
     <string name="confirm_sign_up_okey">Okey</string>
+    <string name="welcome_setup_title">Welcome to Kvitt!</string>
+    <string name="welcome_setup_message">Let\'s finish setting up your account.</string>
+    <string name="welcome_setup_username_required">Enter a username.</string>
+    <string name="welcome_setup_phone_permission_required">Allow contacts permission to load your phone number.</string>
+    <string name="welcome_setup_phone_number_unavailable">Phone number unavailable.</string>
+    <string name="manage_permissions_link">Manage permissions</string>
     <string name="auth_not_configured">Authentication is not configured.</string>
     <string name="auth_network_error">Unable to reach the authentication server.</string>
     <string name="auth_generic_error">Authentication failed.</string>
+    <string name="auth_session_expired">Session expired. Please sign in again.</string>
     <string name="crop_screen_title">Crop</string>
     <string name="receipt_screen_title">Receipt</string>
     <string name="archive_screen_title">Archives</string>
@@ -71,12 +77,19 @@
     <string name="archive_name_label">Archive Name</string>
     <string name="receipt_name_label">Receipt Name</string>
     <string name="history_empty">No receipts have been sent yet.</string>
+    <string name="history_no_internet">No internet connection.</string>
+    <string name="history_receipt_uuid">UUID = %1$s</string>
     <string name="history_unknown_date">Unknown date</string>
     <string name="history_no_participants">No participant details available.</string>
     <string name="remove_from_history">Remove from history</string>
     <string name="remove_from_history_confirmation_title">Remove From History?</string>
     <string name="remove_history_entry">Remove history entry</string>
     <string name="remove_history_entry_failed">Unable to remove this history entry.</string>
+    <string name="history_sync_error">Unable to sync history.</string>
+    <string name="history_sync_unavailable">History sync is unavailable for this account.</string>
+    <string name="history_sync_entry_missing">History entry is missing its sync id.</string>
+    <string name="history_sync_save_failed">Unable to save this history entry.</string>
+    <string name="history_sync_update_failed">Unable to update this history entry.</string>
     <string name="delete_history_title">Delete History</string>
     <string name="delete_history_message">Are you sure you want to delete the %1$s receipt from the history? This action can not be undone.</string>
     <string name="receipt_actions">Receipt actions</string>
@@ -189,8 +202,9 @@
     <string name="settings_permissions_sms_description">Allow Receipt Scanner to send and view SMS messages. Current access: %1$s</string>
     <string name="permission_access_allowed">Allowed</string>
     <string name="permission_access_not_allowed">Not allowed</string>
+    <string name="permission_access_not_available">Not available on this device</string>
     <string name="permission_onboarding_title">Permission</string>
-    <string name="permission_onboarding_message">Grant Receipt Scanner access to your contacts, camera, and SMS messages. These permissions are required for certain features of the app. You can change them at any time in Settings &gt; Permissions.</string>
+    <string name="permission_onboarding_message">Grant Receipt Scanner access to your contacts and camera. These permissions are required for certain features of the app. You can change them at any time in Settings &gt; Permissions.</string>
     <string name="settings_split_items_title">Split Items</string>
     <string name="settings_split_items_description">Whether to list similar items individually or group them together.</string>
     <string name="settings_pre_added_participants_title">Pre Added Participants</string>
@@ -202,6 +216,8 @@
     <string name="manage_permissions_title">Manage Permissions</string>
     <string name="username_changed">Username changed</string>
     <string name="manage">Manage</string>
+    <string name="get_started">Get Started</string>
+    <string name="get_phone_number">Get Phone Number</string>
     <string name="sign_out">Sign out</string>
     <string name="skip">Skip</string>
     <string name="yes">Yes</string>
@@ -221,7 +237,7 @@
     <string name="load_more">Load more</string>
     <string name="send_requests">Send Requests</string>
     <string name="send_requests_confirmation_title">Send Requests?</string>
-    <string name="participant_payment_request_intro">Hello, %1$s!\n\nYour share of the %2$s receipt has been calculated in Kivtt!</string>
+    <string name="participant_payment_request_intro">Hello, %1$s!\n\nYour share of the %2$s receipt has been calculated in Kvitt!</string>
     <string name="participant_payment_request_section_pay">Please pay:</string>
     <string name="participant_payment_request_section_receive">You will receive:</string>
     <string name="participant_payment_request_none">You don\'t need to pay anyone and you are not expected to receive any payments.</string>
@@ -231,6 +247,7 @@
     <string name="send_requests_partial">Sent %1$d payment reminders. Skipped %2$d participants.</string>
     <string name="send_requests_none">No participant requests to send.</string>
     <string name="send_requests_permission_required">SMS permission is required to send payment reminders.</string>
+    <string name="send_requests_not_supported">SMS is not available on this device.</string>
     <string name="receipt_added_to_archive">Receipt added to archive.</string>
     <string name="receipt_added_to_archives">Receipt added to archives.</string>
     <string name="move_archive_empty">No other archives available.</string>

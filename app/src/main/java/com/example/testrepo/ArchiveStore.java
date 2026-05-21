@@ -12,6 +12,8 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 public final class ArchiveStore {
     private static final String PREFS_NAME = "archive_store";
@@ -37,8 +39,7 @@ public final class ArchiveStore {
 
     @NonNull
     public static ArrayList<Archive> loadArchives(@NonNull Context context) {
-        SharedPreferences preferences =
-                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        SharedPreferences preferences = getPreferences(context);
         String rawArchives = preferences.getString(KEY_ARCHIVES, null);
 
         if (rawArchives == null) {
@@ -104,8 +105,7 @@ public final class ArchiveStore {
     public static ArrayList<ReceiptHistoryStore.HistoryEntry> loadStandaloneReceipts(
             @NonNull Context context
     ) {
-        SharedPreferences preferences =
-                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        SharedPreferences preferences = getPreferences(context);
         return parseReceiptsArray(preferences.getString(KEY_STANDALONE_RECEIPTS, "[]"));
     }
 
@@ -293,7 +293,7 @@ public final class ArchiveStore {
             jsonArray.put(archive.toJson());
         }
 
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        getPreferences(context)
                 .edit()
                 .putString(KEY_ARCHIVES, jsonArray.toString())
                 .remove(LEGACY_KEY_ARCHIVE_NAMES)
@@ -304,10 +304,65 @@ public final class ArchiveStore {
             @NonNull Context context,
             @NonNull List<ReceiptHistoryStore.HistoryEntry> receipts
     ) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        getPreferences(context)
                 .edit()
                 .putString(KEY_STANDALONE_RECEIPTS, serializeReceipts(receipts).toString())
                 .apply();
+    }
+
+    @NonNull
+    private static SharedPreferences getPreferences(@NonNull Context context) {
+        SharedPreferences accountPreferences = context.getSharedPreferences(
+                getPreferencesNameForCurrentUser(context),
+                Context.MODE_PRIVATE
+        );
+        migrateLegacyPreferencesIfNeeded(context, accountPreferences);
+        return accountPreferences;
+    }
+
+    @NonNull
+    private static String getPreferencesNameForCurrentUser(@NonNull Context context) {
+        String normalizedEmail = AppSettings.getLoginEmail(context)
+                .trim()
+                .toLowerCase(Locale.US)
+                .replaceAll("[^a-z0-9@._-]", "_");
+        if (normalizedEmail.isEmpty()) {
+            normalizedEmail = "signed_out";
+        }
+        return PREFS_NAME + "_" + normalizedEmail;
+    }
+
+    private static void migrateLegacyPreferencesIfNeeded(
+            @NonNull Context context,
+            @NonNull SharedPreferences accountPreferences
+    ) {
+        if (!accountPreferences.getAll().isEmpty()) {
+            return;
+        }
+
+        SharedPreferences legacyPreferences =
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        Map<String, ?> legacyEntries = legacyPreferences.getAll();
+        if (legacyEntries.isEmpty()) {
+            return;
+        }
+
+        SharedPreferences.Editor accountEditor = accountPreferences.edit();
+        boolean copiedAnyValue = false;
+        for (Map.Entry<String, ?> entry : legacyEntries.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String) {
+                accountEditor.putString(entry.getKey(), (String) value);
+                copiedAnyValue = true;
+            }
+        }
+
+        if (!copiedAnyValue) {
+            return;
+        }
+
+        accountEditor.apply();
+        legacyPreferences.edit().clear().apply();
     }
 
     @NonNull

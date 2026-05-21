@@ -132,6 +132,20 @@ create index if not exists payment_requests_receipt_id_idx
 create index if not exists payment_requests_public_token_idx
     on public.payment_requests (public_token);
 
+create table if not exists public.history_entries (
+    id uuid primary key default gen_random_uuid(),
+    owner_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+    payload jsonb not null,
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists history_entries_owner_id_idx
+    on public.history_entries (owner_id, created_at desc);
+
+alter table public.history_entries
+    alter column owner_id set default auth.uid();
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -253,6 +267,16 @@ begin
         raise exception 'Assigned participant must belong to the same receipt as the item.';
     end if;
 
+    return new;
+end;
+$$;
+
+create or replace function public.assign_history_entry_owner()
+returns trigger
+language plpgsql
+as $$
+begin
+    new.owner_id = auth.uid();
     return new;
 end;
 $$;
@@ -481,6 +505,18 @@ before update on public.payment_requests
 for each row
 execute function public.set_updated_at();
 
+drop trigger if exists history_entries_set_updated_at on public.history_entries;
+create trigger history_entries_set_updated_at
+before update on public.history_entries
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists history_entries_assign_owner on public.history_entries;
+create trigger history_entries_assign_owner
+before insert on public.history_entries
+for each row
+execute function public.assign_history_entry_owner();
+
 alter table public.profiles enable row level security;
 alter table public.archives enable row level security;
 alter table public.receipts enable row level security;
@@ -488,6 +524,7 @@ alter table public.receipt_participants enable row level security;
 alter table public.receipt_items enable row level security;
 alter table public.receipt_item_assignments enable row level security;
 alter table public.payment_requests enable row level security;
+alter table public.history_entries enable row level security;
 
 drop policy if exists "Users can read their own profile" on public.profiles;
 create policy "Users can read their own profile"
@@ -578,3 +615,39 @@ with check (
     private.is_receipt_owner(receipt_id)
     and (select auth.uid()) = requested_by_user_id
 );
+
+drop policy if exists "Users can manage their own history entries"
+    on public.history_entries;
+drop policy if exists "Users can read their own history entries"
+    on public.history_entries;
+drop policy if exists "Users can insert history entries"
+    on public.history_entries;
+drop policy if exists "Users can update their own history entries"
+    on public.history_entries;
+drop policy if exists "Users can delete their own history entries"
+    on public.history_entries;
+
+create policy "Users can read their own history entries"
+on public.history_entries
+for select
+to authenticated
+using ((select auth.uid()) = owner_id);
+
+create policy "Users can insert history entries"
+on public.history_entries
+for insert
+to authenticated
+with check (true);
+
+create policy "Users can update their own history entries"
+on public.history_entries
+for update
+to authenticated
+using ((select auth.uid()) = owner_id)
+with check ((select auth.uid()) = owner_id);
+
+create policy "Users can delete their own history entries"
+on public.history_entries
+for delete
+to authenticated
+using ((select auth.uid()) = owner_id);

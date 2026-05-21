@@ -1,13 +1,17 @@
 const openSwishButton = document.querySelector("#open-swish");
 const swishStatus = document.querySelector("#swish-status");
+const phoneAccessWarning = document.querySelector("#phone-access-warning");
+const phoneAccessLink = document.querySelector("#phone-access-link");
 const SWISH_PAYMENT_REQUEST_URL = "swish://paymentrequest";
 const SWISH_PAYMENT_URL = "swish://payment?data=";
 const PAYMENT_REQUEST_QUERY_KEY = "request";
 const SUPABASE_PAYMENT_REQUEST_LOOKUP_RPC = "get_payment_request_by_token";
 const SUPABASE_PAYMENT_REQUEST_OPENED_RPC = "mark_payment_request_opened";
 const SUPABASE_PAYMENT_REQUEST_CALLBACK_RPC = "mark_payment_request_callback";
+const SELECTED_PHONE_NUMBER_STORAGE_KEY = "kvittSelectedPhoneNumber";
 
 let cachedSupabasePaymentRequest = undefined;
+let selectedPhoneNumber = loadSelectedPhoneNumber();
 
 const getQueryParameter = (name) => {
   const requestedName = name.toLowerCase();
@@ -75,6 +79,80 @@ const buildCallbackUrl = () => {
   callbackUrl.searchParams.delete("token");
   callbackUrl.searchParams.set("swish-return", "1");
   return callbackUrl.toString();
+};
+
+function loadSelectedPhoneNumber() {
+  try {
+    return window.sessionStorage.getItem(SELECTED_PHONE_NUMBER_STORAGE_KEY)?.trim() || "";
+  } catch (error) {
+    return "";
+  }
+}
+
+const storeSelectedPhoneNumber = (phoneNumber) => {
+  selectedPhoneNumber = phoneNumber.trim();
+
+  try {
+    if (selectedPhoneNumber) {
+      window.sessionStorage.setItem(SELECTED_PHONE_NUMBER_STORAGE_KEY, selectedPhoneNumber);
+    } else {
+      window.sessionStorage.removeItem(SELECTED_PHONE_NUMBER_STORAGE_KEY);
+    }
+  } catch (error) {
+    // Ignore storage errors and continue with the in-memory value.
+  }
+};
+
+const hidePhoneAccessWarning = () => {
+  if (phoneAccessWarning) {
+    phoneAccessWarning.hidden = true;
+  }
+};
+
+const showPhoneAccessWarning = () => {
+  if (phoneAccessWarning) {
+    phoneAccessWarning.hidden = false;
+  }
+};
+
+const canRequestPhoneNumber = () =>
+  !!(navigator.contacts && typeof navigator.contacts.select === "function");
+
+const requestPhoneNumberAccess = async () => {
+  if (selectedPhoneNumber) {
+    hidePhoneAccessWarning();
+    return true;
+  }
+
+  if (!canRequestPhoneNumber()) {
+    showPhoneAccessWarning();
+    swishStatus.textContent = "This browser can't request a phone number directly.";
+    return false;
+  }
+
+  try {
+    const selectedContacts = await navigator.contacts.select(["tel"], {
+      multiple: false
+    });
+    const selectedContact = selectedContacts?.[0];
+    const grantedPhoneNumber =
+      selectedContact?.tel?.find((phoneNumber) => phoneNumber && phoneNumber.trim())?.trim() || "";
+
+    if (!grantedPhoneNumber) {
+      showPhoneAccessWarning();
+      swishStatus.textContent = "";
+      return false;
+    }
+
+    storeSelectedPhoneNumber(grantedPhoneNumber);
+    hidePhoneAccessWarning();
+    swishStatus.textContent = "";
+    return true;
+  } catch (error) {
+    showPhoneAccessWarning();
+    swishStatus.textContent = "";
+    return false;
+  }
 };
 
 const getSupabaseClient = () => {
@@ -228,11 +306,21 @@ if (openSwishButton && swishStatus) {
 
   if (getQueryParameter("swish-return") === "1") {
     openSwishButton.hidden = true;
+    hidePhoneAccessWarning();
     swishStatus.textContent = "The receipt manager has been notified of your payment. Thank you for using Kvitt!";
     void reportPaymentRequestLifecycleEvent(SUPABASE_PAYMENT_REQUEST_CALLBACK_RPC);
   }
 
+  phoneAccessLink?.addEventListener("click", async () => {
+    await requestPhoneNumberAccess();
+  });
+
   openSwishButton.addEventListener("click", async () => {
+    const hasPhoneNumberAccess = await requestPhoneNumberAccess();
+    if (!hasPhoneNumberAccess) {
+      return;
+    }
+
     const swishLink = await buildSwishUrl();
     if (swishLink.error) {
       swishStatus.textContent = swishLink.error;

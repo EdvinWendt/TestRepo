@@ -24,8 +24,7 @@ public class PermissionOnboardingDialogFragment extends DialogFragment {
 
     private final String[] permissionSequence = new String[]{
             Manifest.permission.READ_CONTACTS,
-            Manifest.permission.CAMERA,
-            Manifest.permission.SEND_SMS
+            Manifest.permission.CAMERA
     };
     private int nextPermissionIndex;
     private final ActivityResultLauncher<String> requestPermissionLauncher =

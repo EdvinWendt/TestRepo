@@ -24,6 +24,8 @@ final class InstallResetHelper {
         AppSettings.setLoginCompleted(context, false);
         AppSettings.setLoginEmail(context, "");
         AppSettings.setLoginPhoneNumber(context, "");
+        AppSettings.clearLoginAccessToken(context);
+        AppSettings.clearLoginRefreshToken(context);
 
         File parentDirectory = markerFile.getParentFile();
         if (parentDirectory != null && !parentDirectory.exists()) {
