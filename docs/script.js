@@ -1,4 +1,6 @@
 const openSwishButton = document.querySelector("#open-swish");
+const swishLoading = document.querySelector("#swish-loading");
+const swishNotice = document.querySelector("#swish-notice");
 const swishStatus = document.querySelector("#swish-status");
 const SWISH_PAYMENT_REQUEST_URL = "swish://paymentrequest";
 const SWISH_PAYMENT_URL = "swish://payment?data=";
@@ -10,6 +12,7 @@ const SUPABASE_PAYMENT_REQUEST_CALLBACK_RPC = "mark_payment_request_callback";
 
 let cachedSupabasePaymentRequest = undefined;
 let cachedSupabaseHistoryPaymentCard = undefined;
+let compactHistoryLinkReady = true;
 
 const getQueryParameter = (name) => {
   const requestedName = name.toLowerCase();
@@ -70,6 +73,22 @@ const getMissingPaymentDetailMessage = (phone, amount) => {
   }
 
   return "";
+};
+
+const showSwishLoading = (isLoading) => {
+  if (swishLoading) {
+    swishLoading.hidden = !isLoading;
+  }
+
+  if (openSwishButton) {
+    openSwishButton.hidden = isLoading;
+  }
+};
+
+const setSwishNotice = (message) => {
+  if (swishNotice) {
+    swishNotice.textContent = message;
+  }
 };
 
 const buildCallbackUrl = () => {
@@ -193,6 +212,45 @@ const reportPaymentRequestLifecycleEvent = async (rpcName) => {
   }
 };
 
+const initializeCompactHistoryPaymentState = async () => {
+  if (!openSwishButton || !hasCompactHistoryPaymentLink()) {
+    return;
+  }
+
+  compactHistoryLinkReady = false;
+  openSwishButton.disabled = true;
+  setSwishNotice("");
+  swishStatus.textContent = "";
+  showSwishLoading(true);
+
+  try {
+    const historyPaymentCard = await loadSupabaseHistoryPaymentCard();
+    showSwishLoading(false);
+
+    if (historyPaymentCard?.error) {
+      swishStatus.textContent = historyPaymentCard.error;
+      return;
+    }
+
+    if (!historyPaymentCard) {
+      setSwishNotice("Receipt ID not found.");
+      return;
+    }
+
+    if (historyPaymentCard.hasPaid) {
+      setSwishNotice(
+        "This payment has been marked as paid. Before clicking the button, check your Swish history so you don't accidentally pay twice."
+      );
+    }
+
+    compactHistoryLinkReady = true;
+    openSwishButton.disabled = false;
+  } catch (error) {
+    showSwishLoading(false);
+    swishStatus.textContent = "Unable to load payment details right now. Please try again in a moment.";
+  }
+};
+
 const resolvePaymentDetails = async () => {
   const paymentRequest = await loadSupabasePaymentRequest();
   const historyPaymentCard = await loadSupabaseHistoryPaymentCard();
@@ -302,11 +360,20 @@ if (openSwishButton && swishStatus) {
 
   if (getQueryParameter("swish-return") === "1") {
     openSwishButton.hidden = true;
+    if (swishLoading) {
+      swishLoading.hidden = true;
+    }
     swishStatus.textContent = "The receipt manager has been notified of your payment. Thank you for using Kvitt!";
     void reportPaymentRequestLifecycleEvent(SUPABASE_PAYMENT_REQUEST_CALLBACK_RPC);
+  } else {
+    void initializeCompactHistoryPaymentState();
   }
 
   openSwishButton.addEventListener("click", async () => {
+    if (hasCompactHistoryPaymentLink() && !compactHistoryLinkReady) {
+      return;
+    }
+
     const swishLink = await buildSwishUrl();
     if (swishLink.error) {
       swishStatus.textContent = swishLink.error;

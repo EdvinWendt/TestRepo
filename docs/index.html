@@ -13,7 +13,11 @@
     </header>
     <main class="page">
       <div class="swish-panel">
-        <button class="swish-button" id="open-swish" type="button">Open swish</button>
+        <p class="swish-notice" id="swish-notice" aria-live="polite"></p>
+        <div class="swish-action-slot">
+          <div class="swish-loading" id="swish-loading" hidden aria-hidden="true"></div>
+          <button class="swish-button" id="open-swish" type="button">Open swish</button>
+        </div>
         <p class="swish-status" id="swish-status" aria-live="polite"></p>
       </div>
     </main>

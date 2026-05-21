@@ -42,6 +42,37 @@ body {
   gap: 12px;
 }
 
+.swish-notice {
+  color: #9f2a2a;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 24rem;
+  min-height: 3em;
+  text-align: center;
+}
+
+.swish-notice:empty {
+  min-height: 0;
+}
+
+.swish-action-slot {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 52px;
+  min-width: 172px;
+}
+
+.swish-loading {
+  animation: swish-spinner-rotate 0.9s linear infinite;
+  border: 4px solid #d4deea;
+  border-radius: 50%;
+  border-top-color: #1f4a7c;
+  height: 40px;
+  width: 40px;
+}
+
 .swish-button {
   background: #1f4a7c;
   border: 0;
@@ -55,6 +86,11 @@ body {
 
 .swish-button:hover {
   background: #143052;
+}
+
+.swish-button:disabled {
+  background: #9bafc8;
+  cursor: not-allowed;
 }
 
 .swish-status {
@@ -78,4 +114,14 @@ body {
   line-height: 1.5;
   margin: 0;
   text-align: center;
+}
+
+@keyframes swish-spinner-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
