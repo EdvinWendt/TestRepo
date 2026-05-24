@@ -171,17 +171,4 @@
         android:layout_marginBottom="@dimen/dialog_vertical_padding"
         android:text="@string/save_changes"
         android:visibility="gone" />
-
-    <TextView
-        android:id="@+id/text_history_receipt_uuid"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="@dimen/dialog_horizontal_padding"
-        android:layout_marginTop="8dp"
-        android:layout_marginEnd="@dimen/dialog_horizontal_padding"
-        android:layout_marginBottom="@dimen/dialog_vertical_padding"
-        android:gravity="center"
-        android:textAppearance="?attr/textAppearanceBodySmall"
-        android:textColor="?attr/colorOnSurfaceVariant" />
-
 </LinearLayout>

@@ -1,4 +1,5 @@
 create extension if not exists pgcrypto;
+create extension if not exists pg_cron;
 
 create schema if not exists private;
 revoke all on schema private from public;
@@ -281,6 +282,28 @@ begin
 end;
 $$;
 
+create or replace function public.delete_expired_history_entries()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    deleted_count integer;
+begin
+    with deleted_rows as (
+        delete from public.history_entries
+        where created_at < timezone('utc', now()) - interval '30 days'
+        returning 1
+    )
+    select count(*)
+    into deleted_count
+    from deleted_rows;
+
+    return deleted_count;
+end;
+$$;
+
 drop trigger if exists receipt_item_assignments_receipt_match
     on public.receipt_item_assignments;
 
@@ -462,12 +485,154 @@ begin
 end;
 $$;
 
+create or replace function public.get_history_payment_card_by_short_id(
+    receipt_short_id text,
+    payment_card_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    history_record public.history_entries%rowtype;
+    payment_card jsonb;
+    normalized_receipt_short_id text;
+    normalized_payment_card_id text;
+begin
+    normalized_receipt_short_id := lower(btrim(coalesce(receipt_short_id, '')));
+    normalized_payment_card_id := btrim(coalesce(payment_card_id, ''));
+
+    if normalized_receipt_short_id = '' or normalized_payment_card_id = '' then
+        return jsonb_build_object('found', false);
+    end if;
+
+    select *
+    into history_record
+    from public.history_entries
+    where lower(left(id::text, 8)) = normalized_receipt_short_id
+    order by created_at desc
+    limit 1;
+
+    if not found then
+        return jsonb_build_object('found', false);
+    end if;
+
+    select card
+    into payment_card
+    from jsonb_array_elements(coalesce(history_record.payload -> 'payment_cards', '[]'::jsonb)) card
+    where card ->> 'id' = normalized_payment_card_id
+    limit 1;
+
+    if payment_card is null then
+        return jsonb_build_object('found', false);
+    end if;
+
+    return jsonb_build_object(
+        'found', true,
+        'receiptId', history_record.id,
+        'receiptShortId', left(history_record.id::text, 8),
+        'paymentCardId', normalized_payment_card_id,
+        'recipientPhone', coalesce(payment_card ->> 'recipient_phone', ''),
+        'amount', coalesce(payment_card ->> 'amount', ''),
+        'hasPaid', case
+            when jsonb_typeof(payment_card -> 'has_paid') = 'boolean'
+                then (payment_card ->> 'has_paid')::boolean
+            else false
+        end,
+        'message', coalesce(history_record.payload ->> 'receipt_name', '')
+    );
+end;
+$$;
+
+create or replace function public.mark_history_payment_card_paid(
+    receipt_short_id text,
+    payment_card_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    history_record public.history_entries%rowtype;
+    payment_card jsonb;
+    payment_card_index integer;
+    normalized_receipt_short_id text;
+    normalized_payment_card_id text;
+begin
+    normalized_receipt_short_id := lower(btrim(coalesce(receipt_short_id, '')));
+    normalized_payment_card_id := btrim(coalesce(payment_card_id, ''));
+
+    if normalized_receipt_short_id = '' or normalized_payment_card_id = '' then
+        return jsonb_build_object('found', false);
+    end if;
+
+    select *
+    into history_record
+    from public.history_entries
+    where lower(left(id::text, 8)) = normalized_receipt_short_id
+    order by created_at desc
+    limit 1;
+
+    if not found then
+        return jsonb_build_object('found', false);
+    end if;
+
+    select card, ordinality::integer - 1
+    into payment_card, payment_card_index
+    from jsonb_array_elements(coalesce(history_record.payload -> 'payment_cards', '[]'::jsonb))
+        with ordinality as cards(card, ordinality)
+    where card ->> 'id' = normalized_payment_card_id
+    limit 1;
+
+    if payment_card is null or payment_card_index is null then
+        return jsonb_build_object('found', false);
+    end if;
+
+    update public.history_entries
+    set payload = jsonb_set(
+            payload,
+            array['payment_cards', payment_card_index::text, 'has_paid'],
+            'true'::jsonb,
+            true
+        ),
+        updated_at = timezone('utc', now())
+    where id = history_record.id
+    returning *
+    into history_record;
+
+    payment_card := jsonb_set(payment_card, '{has_paid}', 'true'::jsonb, true);
+
+    return jsonb_build_object(
+        'found', true,
+        'receiptId', history_record.id,
+        'receiptShortId', left(history_record.id::text, 8),
+        'paymentCardId', normalized_payment_card_id,
+        'recipientPhone', coalesce(payment_card ->> 'recipient_phone', ''),
+        'amount', coalesce(payment_card ->> 'amount', ''),
+        'hasPaid', true,
+        'message', coalesce(history_record.payload ->> 'receipt_name', '')
+    );
+end;
+$$;
+
 grant execute on function public.get_payment_request_by_token(text)
     to anon, authenticated;
 grant execute on function public.mark_payment_request_opened(text)
     to anon, authenticated;
 grant execute on function public.mark_payment_request_callback(text)
     to anon, authenticated;
+grant execute on function public.get_history_payment_card_by_short_id(text, text)
+    to anon, authenticated;
+grant execute on function public.mark_history_payment_card_paid(text, text)
+    to anon, authenticated;
+
+select cron.schedule(
+    'history-entries-retention',
+    '0 3 * * *',
+    $$ select public.delete_expired_history_entries(); $$
+);
 
 drop trigger if exists profiles_set_updated_at on public.profiles;
 create trigger profiles_set_updated_at

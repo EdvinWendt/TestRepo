@@ -10,7 +10,10 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -29,6 +32,8 @@ final class ReceiptHistoryStore {
     private static final String KEY_PARTICIPANTS = "participants";
     private static final String KEY_ITEMS = "items";
     private static final String KEY_ARCHIVED_RECEIPTS = "archived_receipts";
+    private static final String KEY_PAYMENT_CARDS = "payment_cards";
+    private static final String KEY_PAYMENT_CARD_ID = "id";
     private static final String KEY_PARTICIPANT_NAME = "name";
     private static final String KEY_PARTICIPANT_AMOUNT = "amount";
     private static final String KEY_PARTICIPANT_KEY = "key";
@@ -42,6 +47,8 @@ final class ReceiptHistoryStore {
     private static final String KEY_ITEM_HAS_PAID = "has_paid";
     private static final String KEY_ITEM_PAYER_PARTICIPANT_KEY = "payer_participant_key";
     private static final String KEY_ITEM_SELECTED_PARTICIPANT_KEYS = "selected_participant_keys";
+    private static final String KEY_PAYMENT_CARD_HAS_PAID = "has_paid";
+    private static final String KEY_PAYMENT_CARD_RECIPIENT_PHONE = "recipient_phone";
 
     private ReceiptHistoryStore() {
     }
@@ -173,6 +180,8 @@ final class ReceiptHistoryStore {
                     ? participant.copyWithPaidStatus(hasPaid)
                     : participant);
         }
+        ArrayList<PaymentCard> updatedPaymentCards =
+                copyPaymentCardsWithParticipantPaidStatus(sourceEntry, participantKey, hasPaid);
 
         return new HistoryEntry(
                 sourceEntry.receiptName,
@@ -183,6 +192,7 @@ final class ReceiptHistoryStore {
                 sourceEntry.items,
                 sourceEntry.entryType,
                 sourceEntry.archivedReceipts,
+                updatedPaymentCards,
                 sourceEntry.storageId
         );
     }
@@ -195,12 +205,23 @@ final class ReceiptHistoryStore {
     ) {
         ArrayList<HistoryItem> updatedItems = new ArrayList<>();
         boolean itemUpdated = false;
+        int updatedItemIndex = -1;
         for (HistoryItem item : sourceEntry.items) {
             if (!itemUpdated && item.matches(targetItem)) {
                 updatedItems.add(item.copyWithPaidStatus(hasPaid));
                 itemUpdated = true;
+                updatedItemIndex = updatedItems.size() - 1;
             } else {
                 updatedItems.add(item);
+            }
+        }
+        ArrayList<PaymentCard> updatedPaymentCards = new ArrayList<>();
+        for (int index = 0; index < sourceEntry.paymentCards.size(); index++) {
+            PaymentCard paymentCard = sourceEntry.paymentCards.get(index);
+            if (index == updatedItemIndex) {
+                updatedPaymentCards.add(paymentCard.copyWithPaidStatus(hasPaid));
+            } else {
+                updatedPaymentCards.add(paymentCard);
             }
         }
 
@@ -213,8 +234,243 @@ final class ReceiptHistoryStore {
                 updatedItems,
                 sourceEntry.entryType,
                 sourceEntry.archivedReceipts,
+                updatedPaymentCards,
                 sourceEntry.storageId
         );
+    }
+
+    @NonNull
+    static HistoryEntry withPaymentCardPaidStatus(
+            @NonNull HistoryEntry sourceEntry,
+            @NonNull String paymentCardId,
+            boolean hasPaid
+    ) {
+        ArrayList<PaymentCard> updatedPaymentCards = new ArrayList<>();
+        boolean updatedAnyCard = false;
+        for (PaymentCard paymentCard : sourceEntry.paymentCards) {
+            if (!updatedAnyCard && paymentCard.id.equals(paymentCardId)) {
+                updatedPaymentCards.add(paymentCard.copyWithPaidStatus(hasPaid));
+                updatedAnyCard = true;
+            } else {
+                updatedPaymentCards.add(paymentCard);
+            }
+        }
+
+        if (!updatedAnyCard) {
+            return sourceEntry;
+        }
+
+        ArrayList<ParticipantShare> updatedParticipants =
+                HistoryEntry.applyPaymentCardPaidStatusesToParticipants(
+                        sourceEntry.participants,
+                        sourceEntry.items,
+                        updatedPaymentCards,
+                        sourceEntry.entryType
+                );
+        ArrayList<HistoryItem> updatedItems =
+                HistoryEntry.applyPaymentCardPaidStatusesToItems(
+                        sourceEntry.items,
+                        updatedPaymentCards,
+                        sourceEntry.entryType
+                );
+
+        return new HistoryEntry(
+                sourceEntry.receiptName,
+                sourceEntry.totalAmount,
+                sourceEntry.sentDate,
+                sourceEntry.message,
+                updatedParticipants,
+                updatedItems,
+                sourceEntry.entryType,
+                sourceEntry.archivedReceipts,
+                updatedPaymentCards,
+                sourceEntry.storageId
+        );
+    }
+
+    @NonNull
+    private static ArrayList<PaymentCard> copyPaymentCardsWithParticipantPaidStatus(
+            @NonNull HistoryEntry sourceEntry,
+            @NonNull String participantKey,
+            boolean hasPaid
+    ) {
+        ArrayList<String> debtorKeys = resolvePaymentCardDebtorKeys(sourceEntry);
+        ArrayList<PaymentCard> updatedPaymentCards = new ArrayList<>();
+        for (int index = 0; index < sourceEntry.paymentCards.size(); index++) {
+            PaymentCard paymentCard = sourceEntry.paymentCards.get(index);
+            boolean shouldUpdate = index < debtorKeys.size()
+                    && participantKey.equals(debtorKeys.get(index));
+            updatedPaymentCards.add(
+                    shouldUpdate ? paymentCard.copyWithPaidStatus(hasPaid) : paymentCard
+            );
+        }
+        return updatedPaymentCards;
+    }
+
+    @NonNull
+    private static ArrayList<String> resolvePaymentCardDebtorKeys(
+            @NonNull HistoryEntry sourceEntry
+    ) {
+        return ENTRY_TYPE_ARCHIVE_SUMMARY.equals(sourceEntry.entryType)
+                ? buildArchiveSummaryPaymentCardDebtorKeys(sourceEntry.items)
+                : buildReceiptPaymentCardDebtorKeys(sourceEntry.participants, sourceEntry.items);
+    }
+
+    @NonNull
+    private static ArrayList<String> buildArchiveSummaryPaymentCardDebtorKeys(
+            @NonNull List<HistoryItem> items
+    ) {
+        ArrayList<String> debtorKeys = new ArrayList<>();
+        for (HistoryItem item : items) {
+            debtorKeys.add(item.selectedParticipantKeys.isEmpty()
+                    ? ""
+                    : item.selectedParticipantKeys.get(0));
+        }
+        return debtorKeys;
+    }
+
+    @NonNull
+    private static ArrayList<String> buildReceiptPaymentCardDebtorKeys(
+            @NonNull List<ParticipantShare> participants,
+            @NonNull List<HistoryItem> items
+    ) {
+        LinkedHashMap<String, ParticipantShare> participantsByKey = new LinkedHashMap<>();
+        LinkedHashMap<String, BigDecimal> balancesByKey = new LinkedHashMap<>();
+        for (ParticipantShare participant : participants) {
+            participantsByKey.put(participant.key, participant);
+            balancesByKey.put(participant.key, BigDecimal.ZERO);
+        }
+
+        for (HistoryItem item : items) {
+            ParticipantShare payer = findReceiptPaymentCardPayer(participants, item);
+            if (payer == null) {
+                continue;
+            }
+
+            participantsByKey.putIfAbsent(payer.key, payer);
+            balancesByKey.putIfAbsent(payer.key, BigDecimal.ZERO);
+
+            int selectedParticipantCount = countSelectedParticipants(item, participants);
+            if (selectedParticipantCount == 0) {
+                continue;
+            }
+
+            BigDecimal itemAmount = parseCurrencyAmount(item.price);
+            BigDecimal sharedAmount = itemAmount.divide(
+                    BigDecimal.valueOf(selectedParticipantCount),
+                    2,
+                    RoundingMode.HALF_UP
+            );
+            for (ParticipantShare participant : participants) {
+                if (!item.isParticipantSelected(participant.key)
+                        || participant.key.equals(payer.key)) {
+                    continue;
+                }
+
+                balancesByKey.put(
+                        payer.key,
+                        balancesByKey.get(payer.key).add(sharedAmount)
+                );
+                balancesByKey.put(
+                        participant.key,
+                        balancesByKey.get(participant.key).subtract(sharedAmount)
+                );
+            }
+        }
+
+        ArrayList<TransferBalance> creditors = new ArrayList<>();
+        ArrayList<TransferBalance> debtors = new ArrayList<>();
+        for (String participantKey : balancesByKey.keySet()) {
+            BigDecimal balance = balancesByKey.get(participantKey).setScale(2, RoundingMode.HALF_UP);
+            if (balance.compareTo(BigDecimal.ZERO) > 0) {
+                creditors.add(new TransferBalance(participantsByKey.get(participantKey), balance));
+            } else if (balance.compareTo(BigDecimal.ZERO) < 0) {
+                debtors.add(new TransferBalance(
+                        participantsByKey.get(participantKey),
+                        balance.abs()
+                ));
+            }
+        }
+
+        ArrayList<String> debtorKeys = new ArrayList<>();
+        while (!creditors.isEmpty() && !debtors.isEmpty()) {
+            creditors.sort((first, second) -> second.amount.compareTo(first.amount));
+            debtors.sort((first, second) -> second.amount.compareTo(first.amount));
+
+            TransferBalance creditor = creditors.get(0);
+            TransferBalance debtor = debtors.get(0);
+            BigDecimal transferAmount = creditor.amount.min(debtor.amount)
+                    .setScale(2, RoundingMode.HALF_UP);
+            debtorKeys.add(debtor.participant.key);
+
+            creditor.amount = creditor.amount.subtract(transferAmount);
+            debtor.amount = debtor.amount.subtract(transferAmount);
+
+            if (creditor.amount.compareTo(BigDecimal.ZERO) == 0) {
+                creditors.remove(0);
+            }
+            if (debtor.amount.compareTo(BigDecimal.ZERO) == 0) {
+                debtors.remove(0);
+            }
+        }
+
+        return debtorKeys;
+    }
+
+    @Nullable
+    private static ParticipantShare findReceiptPaymentCardPayer(
+            @NonNull List<ParticipantShare> participants,
+            @NonNull HistoryItem item
+    ) {
+        String payerParticipantKey = item.payerParticipantKey.trim();
+        if (!payerParticipantKey.isEmpty()) {
+            for (ParticipantShare participant : participants) {
+                if (participant.key.equals(payerParticipantKey)) {
+                    return participant;
+                }
+            }
+        }
+
+        for (ParticipantShare participant : participants) {
+            if (participant.isCrowned) {
+                return participant;
+            }
+        }
+
+        for (ParticipantShare participant : participants) {
+            if (participant.key.startsWith("participant_you")) {
+                return participant;
+            }
+        }
+
+        return participants.isEmpty() ? null : participants.get(0);
+    }
+
+    private static int countSelectedParticipants(
+            @NonNull HistoryItem item,
+            @NonNull List<ParticipantShare> participants
+    ) {
+        int count = 0;
+        for (ParticipantShare participant : participants) {
+            if (item.isParticipantSelected(participant.key)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    @NonNull
+    private static BigDecimal parseCurrencyAmount(@NonNull String amountText) {
+        String normalizedAmount = amountText.trim().replace("kr", "").replace(",", ".");
+        if (normalizedAmount.isEmpty()) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+
+        try {
+            return new BigDecimal(normalizedAmount).setScale(2, RoundingMode.HALF_UP);
+        } catch (NumberFormatException exception) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
     }
 
     @NonNull
@@ -283,6 +539,7 @@ final class ReceiptHistoryStore {
         final ArrayList<ParticipantShare> participants;
         final ArrayList<HistoryItem> items;
         final ArrayList<HistoryEntry> archivedReceipts;
+        final ArrayList<PaymentCard> paymentCards;
 
         HistoryEntry(
                 @NonNull String receiptName,
@@ -300,6 +557,7 @@ final class ReceiptHistoryStore {
                     participants,
                     items,
                     ENTRY_TYPE_RECEIPT,
+                    new ArrayList<>(),
                     new ArrayList<>(),
                     ""
             );
@@ -322,6 +580,7 @@ final class ReceiptHistoryStore {
                     participants,
                     items,
                     entryType,
+                    new ArrayList<>(),
                     new ArrayList<>(),
                     ""
             );
@@ -346,6 +605,32 @@ final class ReceiptHistoryStore {
                     items,
                     entryType,
                     archivedReceipts,
+                    new ArrayList<>(),
+                    ""
+            );
+        }
+
+        HistoryEntry(
+                @NonNull String receiptName,
+                @NonNull String totalAmount,
+                @NonNull String sentDate,
+                @NonNull String message,
+                @NonNull List<ParticipantShare> participants,
+                @NonNull List<HistoryItem> items,
+                @NonNull String entryType,
+                @NonNull List<HistoryEntry> archivedReceipts,
+                @NonNull List<PaymentCard> paymentCards
+        ) {
+            this(
+                    receiptName,
+                    totalAmount,
+                    sentDate,
+                    message,
+                    participants,
+                    items,
+                    entryType,
+                    archivedReceipts,
+                    paymentCards,
                     ""
             );
         }
@@ -361,6 +646,32 @@ final class ReceiptHistoryStore {
                 @NonNull List<HistoryEntry> archivedReceipts,
                 @Nullable String storageId
         ) {
+            this(
+                    receiptName,
+                    totalAmount,
+                    sentDate,
+                    message,
+                    participants,
+                    items,
+                    entryType,
+                    archivedReceipts,
+                    new ArrayList<>(),
+                    storageId
+            );
+        }
+
+        HistoryEntry(
+                @NonNull String receiptName,
+                @NonNull String totalAmount,
+                @NonNull String sentDate,
+                @NonNull String message,
+                @NonNull List<ParticipantShare> participants,
+                @NonNull List<HistoryItem> items,
+                @NonNull String entryType,
+                @NonNull List<HistoryEntry> archivedReceipts,
+                @NonNull List<PaymentCard> paymentCards,
+                @Nullable String storageId
+        ) {
             this.storageId = storageId == null ? "" : storageId.trim();
             this.entryType = entryType;
             this.receiptName = receiptName;
@@ -370,6 +681,7 @@ final class ReceiptHistoryStore {
             this.participants = new ArrayList<>(participants);
             this.items = new ArrayList<>(items);
             this.archivedReceipts = new ArrayList<>(archivedReceipts);
+            this.paymentCards = new ArrayList<>(paymentCards);
         }
 
         @NonNull
@@ -378,6 +690,7 @@ final class ReceiptHistoryStore {
             JSONArray participantArray = new JSONArray();
             JSONArray itemArray = new JSONArray();
             JSONArray archivedReceiptsArray = new JSONArray();
+            JSONArray paymentCardsArray = new JSONArray();
             for (ParticipantShare participant : participants) {
                 participantArray.put(participant.toJson());
             }
@@ -386,6 +699,9 @@ final class ReceiptHistoryStore {
             }
             for (HistoryEntry archivedReceipt : archivedReceipts) {
                 archivedReceiptsArray.put(archivedReceipt.toJson());
+            }
+            for (PaymentCard paymentCard : paymentCards) {
+                paymentCardsArray.put(paymentCard.toJson());
             }
 
             try {
@@ -397,6 +713,7 @@ final class ReceiptHistoryStore {
                 object.put(KEY_PARTICIPANTS, participantArray);
                 object.put(KEY_ITEMS, itemArray);
                 object.put(KEY_ARCHIVED_RECEIPTS, archivedReceiptsArray);
+                object.put(KEY_PAYMENT_CARDS, paymentCardsArray);
             } catch (JSONException exception) {
                 throw new IllegalStateException("Unable to serialize history entry", exception);
             }
@@ -442,17 +759,108 @@ final class ReceiptHistoryStore {
                 }
             }
 
+            JSONArray paymentCardsArray = object.optJSONArray(KEY_PAYMENT_CARDS);
+            ArrayList<PaymentCard> paymentCards = new ArrayList<>();
+            if (paymentCardsArray != null) {
+                for (int index = 0; index < paymentCardsArray.length(); index++) {
+                    JSONObject paymentCardObject = paymentCardsArray.optJSONObject(index);
+                    if (paymentCardObject == null) {
+                        continue;
+                    }
+                    paymentCards.add(PaymentCard.fromJson(paymentCardObject, index));
+                }
+            }
+            ArrayList<ParticipantShare> resolvedParticipants =
+                    applyPaymentCardPaidStatusesToParticipants(
+                            participants,
+                            items,
+                            paymentCards,
+                            object.optString(KEY_ENTRY_TYPE, ENTRY_TYPE_RECEIPT)
+                    );
+            ArrayList<HistoryItem> resolvedItems =
+                    applyPaymentCardPaidStatusesToItems(
+                            items,
+                            paymentCards,
+                            object.optString(KEY_ENTRY_TYPE, ENTRY_TYPE_RECEIPT)
+                    );
+
             return new HistoryEntry(
                     object.optString(KEY_RECEIPT_NAME, ""),
                     object.optString(KEY_TOTAL_AMOUNT, ""),
                     object.optString(KEY_SENT_DATE, ""),
                     object.optString(KEY_MESSAGE, ""),
-                    participants,
-                    items,
+                    resolvedParticipants,
+                    resolvedItems,
                     object.optString(KEY_ENTRY_TYPE, ENTRY_TYPE_RECEIPT),
                     archivedReceipts,
+                    paymentCards,
                     ""
             );
+        }
+
+        @NonNull
+        private static ArrayList<ParticipantShare> applyPaymentCardPaidStatusesToParticipants(
+                @NonNull List<ParticipantShare> participants,
+                @NonNull List<HistoryItem> items,
+                @NonNull List<PaymentCard> paymentCards,
+                @NonNull String entryType
+        ) {
+            if (paymentCards.isEmpty()) {
+                return new ArrayList<>(participants);
+            }
+
+            LinkedHashMap<String, Boolean> hasCardsByParticipantKey = new LinkedHashMap<>();
+            LinkedHashMap<String, Boolean> allCardsPaidByParticipantKey = new LinkedHashMap<>();
+            ArrayList<String> debtorKeys = ENTRY_TYPE_ARCHIVE_SUMMARY.equals(entryType)
+                    ? ReceiptHistoryStore.buildArchiveSummaryPaymentCardDebtorKeys(items)
+                    : ReceiptHistoryStore.buildReceiptPaymentCardDebtorKeys(participants, items);
+            for (int index = 0; index < paymentCards.size() && index < debtorKeys.size(); index++) {
+                String participantKey = debtorKeys.get(index);
+                if (participantKey.isEmpty()) {
+                    continue;
+                }
+
+                PaymentCard paymentCard = paymentCards.get(index);
+                hasCardsByParticipantKey.put(participantKey, true);
+                boolean currentAllPaid = Boolean.TRUE.equals(
+                        allCardsPaidByParticipantKey.getOrDefault(participantKey, true)
+                );
+                allCardsPaidByParticipantKey.put(participantKey, currentAllPaid && paymentCard.hasPaid);
+            }
+
+            ArrayList<ParticipantShare> resolvedParticipants = new ArrayList<>();
+            for (ParticipantShare participant : participants) {
+                if (hasCardsByParticipantKey.containsKey(participant.key)) {
+                    resolvedParticipants.add(participant.copyWithPaidStatus(
+                            Boolean.TRUE.equals(allCardsPaidByParticipantKey.get(participant.key))
+                    ));
+                } else {
+                    resolvedParticipants.add(participant);
+                }
+            }
+            return resolvedParticipants;
+        }
+
+        @NonNull
+        private static ArrayList<HistoryItem> applyPaymentCardPaidStatusesToItems(
+                @NonNull List<HistoryItem> items,
+                @NonNull List<PaymentCard> paymentCards,
+                @NonNull String entryType
+        ) {
+            if (!ENTRY_TYPE_ARCHIVE_SUMMARY.equals(entryType) || paymentCards.isEmpty()) {
+                return new ArrayList<>(items);
+            }
+
+            ArrayList<HistoryItem> resolvedItems = new ArrayList<>();
+            for (int index = 0; index < items.size(); index++) {
+                HistoryItem item = items.get(index);
+                if (index < paymentCards.size()) {
+                    resolvedItems.add(item.copyWithPaidStatus(paymentCards.get(index).hasPaid));
+                } else {
+                    resolvedItems.add(item);
+                }
+            }
+            return resolvedItems;
         }
 
         @NonNull
@@ -461,12 +869,13 @@ final class ReceiptHistoryStore {
                     receiptName,
                     totalAmount,
                     sentDate,
-                    message,
-                    participants,
-                    items,
-                    entryType,
-                    archivedReceipts,
-                    storageId
+                message,
+                participants,
+                items,
+                entryType,
+                archivedReceipts,
+                paymentCards,
+                storageId
             );
         }
 
@@ -482,7 +891,8 @@ final class ReceiptHistoryStore {
                     || !message.equals(other.message)
                     || participants.size() != other.participants.size()
                     || items.size() != other.items.size()
-                    || archivedReceipts.size() != other.archivedReceipts.size()) {
+                    || archivedReceipts.size() != other.archivedReceipts.size()
+                    || paymentCards.size() != other.paymentCards.size()) {
                 return false;
             }
 
@@ -504,7 +914,93 @@ final class ReceiptHistoryStore {
                 }
             }
 
+            for (int index = 0; index < paymentCards.size(); index++) {
+                if (!paymentCards.get(index).matches(other.paymentCards.get(index))) {
+                    return false;
+                }
+            }
+
             return true;
+        }
+    }
+
+    static final class PaymentCard {
+        final String id;
+        final String amount;
+        final String recipientPhoneNumber;
+        final boolean hasPaid;
+
+        PaymentCard(
+                @NonNull String id,
+                @NonNull String amount,
+                @NonNull String recipientPhoneNumber,
+                boolean hasPaid
+        ) {
+            this.id = id;
+            this.amount = amount;
+            this.recipientPhoneNumber = recipientPhoneNumber;
+            this.hasPaid = hasPaid;
+        }
+
+        @NonNull
+        private JSONObject toJson() {
+            JSONObject object = new JSONObject();
+            try {
+                object.put(KEY_PAYMENT_CARD_ID, id);
+                object.put(KEY_PARTICIPANT_AMOUNT, amount);
+                object.put(KEY_PAYMENT_CARD_HAS_PAID, hasPaid);
+                object.put(KEY_PAYMENT_CARD_RECIPIENT_PHONE, recipientPhoneNumber);
+            } catch (JSONException exception) {
+                throw new IllegalStateException("Unable to serialize payment card", exception);
+            }
+            return object;
+        }
+
+        @NonNull
+        private static PaymentCard fromJson(@NonNull JSONObject object, int index) {
+            return new PaymentCard(
+                    object.optString(KEY_PAYMENT_CARD_ID, buildPaymentCardId(index)),
+                    object.optString(KEY_PARTICIPANT_AMOUNT, ""),
+                    object.optString(KEY_PAYMENT_CARD_RECIPIENT_PHONE, ""),
+                    object.optBoolean(KEY_PAYMENT_CARD_HAS_PAID, false)
+            );
+        }
+
+        @NonNull
+        PaymentCard copyWithPaidStatus(boolean hasPaid) {
+            return new PaymentCard(
+                    id,
+                    amount,
+                    recipientPhoneNumber,
+                    hasPaid
+            );
+        }
+
+        private boolean matches(@NonNull PaymentCard other) {
+            return id.equals(other.id)
+                    && amount.equals(other.amount)
+                    && hasPaid == other.hasPaid
+                    && recipientPhoneNumber.equals(other.recipientPhoneNumber);
+        }
+    }
+
+    @NonNull
+    static String buildPaymentCardId(int index) {
+        return String.format(Locale.US, "%04d", index + 1);
+    }
+
+    private static final class TransferBalance {
+        @NonNull
+        private final ParticipantShare participant;
+        @NonNull
+        private BigDecimal amount;
+
+        private TransferBalance(
+                @NonNull ParticipantShare participant,
+                @NonNull BigDecimal amount
+        ) {
+            this.participant = participant;
+            this.amount = amount;
         }
     }
 
@@ -549,7 +1045,6 @@ final class ReceiptHistoryStore {
                 object.put(KEY_PARTICIPANT_PHONE, phoneNumber);
                 object.put(KEY_PARTICIPANT_AMOUNT, amount);
                 object.put(KEY_PARTICIPANT_IS_CROWNED, isCrowned);
-                object.put(KEY_PARTICIPANT_HAS_PAID, hasPaid);
             } catch (JSONException exception) {
                 throw new IllegalStateException("Unable to serialize participant share", exception);
             }
@@ -660,7 +1155,6 @@ final class ReceiptHistoryStore {
             try {
                 object.put(KEY_ITEM_NAME, name);
                 object.put(KEY_ITEM_PRICE, price);
-                object.put(KEY_ITEM_HAS_PAID, hasPaid);
                 object.put(KEY_ITEM_PAYER_PARTICIPANT_KEY, payerParticipantKey);
                 object.put(KEY_ITEM_SELECTED_PARTICIPANT_KEYS, selectedParticipantsArray);
             } catch (JSONException exception) {

@@ -39,6 +39,7 @@ import androidx.appcompat.widget.AppCompatImageButton;
 import androidx.appcompat.widget.AppCompatImageView;
 import androidx.core.content.ContextCompat;
 import androidx.core.widget.TextViewCompat;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
@@ -81,6 +82,10 @@ public class HistoryActivity extends AppCompatActivity {
     private HistoryEntriesAdapter historyEntriesAdapter;
     private View loadMoreFooterView;
     @Nullable
+    private SwipeRefreshLayout historySwipeRefreshLayout;
+    @Nullable
+    private ListView historyListView;
+    @Nullable
     private View historyEmptyStateView;
     @Nullable
     private AppCompatImageView historyEmptyIconView;
@@ -105,7 +110,8 @@ public class HistoryActivity extends AppCompatActivity {
 
         View backButton = findViewById(R.id.button_back);
         View settingsMenuButton = findViewById(R.id.button_history_actions);
-        ListView historyListView = findViewById(R.id.list_history_receipts);
+        historySwipeRefreshLayout = findViewById(R.id.swipe_refresh_history);
+        historyListView = findViewById(R.id.list_history_receipts);
         loadMoreFooterView = getLayoutInflater().inflate(
                 R.layout.item_history_load_more,
                 historyListView,
@@ -121,6 +127,12 @@ public class HistoryActivity extends AppCompatActivity {
         historyEmptyTextView = findViewById(R.id.text_history_empty);
         historyLoadingIndicatorView = findViewById(R.id.progress_history_loading);
         historyListView.setEmptyView(historyEmptyStateView);
+        if (historySwipeRefreshLayout != null) {
+            historySwipeRefreshLayout.setOnRefreshListener(this::refreshHistoryEntries);
+            historySwipeRefreshLayout.setOnChildScrollUpCallback((parent, child) ->
+                    historyListView != null && historyListView.canScrollVertically(-1)
+            );
+        }
         showDefaultEmptyState();
         backButton.setOnClickListener(view -> finish());
         settingsMenuButton.setOnClickListener(
@@ -151,12 +163,26 @@ public class HistoryActivity extends AppCompatActivity {
     }
 
     private void loadHistoryEntries() {
-        loadHistoryEntries(INITIAL_VISIBLE_HISTORY_COUNT);
+        loadHistoryEntries(INITIAL_VISIBLE_HISTORY_COUNT, false);
     }
 
     private void loadHistoryEntries(int requestedVisibleCount) {
+        loadHistoryEntries(requestedVisibleCount, false);
+    }
+
+    private void refreshHistoryEntries() {
+        if (loadingHistoryEntries) {
+            if (historySwipeRefreshLayout != null) {
+                historySwipeRefreshLayout.setRefreshing(false);
+            }
+            return;
+        }
+        loadHistoryEntries(visibleHistoryCount, true);
+    }
+
+    private void loadHistoryEntries(int requestedVisibleCount, boolean isSwipeRefresh) {
         int safeRequestedVisibleCount = Math.max(INITIAL_VISIBLE_HISTORY_COUNT, requestedVisibleCount);
-        showHistoryLoadingState();
+        showHistoryLoadingState(isSwipeRefresh);
         if (!hasInternetConnection()) {
             hideHistoryLoadingState();
             showOfflineEmptyState();
@@ -313,10 +339,13 @@ public class HistoryActivity extends AppCompatActivity {
                 || normalizedMessage.equals(getString(R.string.history_no_internet));
     }
 
-    private void showHistoryLoadingState() {
+    private void showHistoryLoadingState(boolean isSwipeRefresh) {
         loadingHistoryEntries = true;
+        if (historySwipeRefreshLayout != null) {
+            historySwipeRefreshLayout.setRefreshing(isSwipeRefresh);
+        }
         if (historyLoadingIndicatorView != null) {
-            historyLoadingIndicatorView.setVisibility(View.VISIBLE);
+            historyLoadingIndicatorView.setVisibility(isSwipeRefresh ? View.GONE : View.VISIBLE);
         }
         updateEmptyStateViews();
         updateLoadMoreVisibility();
@@ -324,6 +353,9 @@ public class HistoryActivity extends AppCompatActivity {
 
     private void hideHistoryLoadingState() {
         loadingHistoryEntries = false;
+        if (historySwipeRefreshLayout != null) {
+            historySwipeRefreshLayout.setRefreshing(false);
+        }
         if (historyLoadingIndicatorView != null) {
             historyLoadingIndicatorView.setVisibility(View.GONE);
         }
@@ -336,7 +368,6 @@ public class HistoryActivity extends AppCompatActivity {
                 .inflate(R.layout.dialog_history_receipt_details, null);
         TextView titleView = dialogView.findViewById(R.id.text_history_receipt_dialog_title);
         TextView messageView = dialogView.findViewById(R.id.text_history_receipt_dialog_message);
-        TextView uuidView = dialogView.findViewById(R.id.text_history_receipt_uuid);
         AppCompatImageButton closeButton =
                 dialogView.findViewById(R.id.button_close_history_receipt);
         LinearLayout participantsLayout =
@@ -357,7 +388,6 @@ public class HistoryActivity extends AppCompatActivity {
         LinearLayout itemsLayout = dialogView.findViewById(R.id.layout_history_receipt_items);
 
         titleView.setText(entry.receiptName);
-        uuidView.setText(getString(R.string.history_receipt_uuid, entry.storageId));
 
         String message = entry.message == null ? "" : entry.message.trim();
         if (entry.isArchiveSummary()) {
@@ -514,19 +544,6 @@ public class HistoryActivity extends AppCompatActivity {
                 payNowButton.setVisibility(View.GONE);
                 payNowButton.setOnClickListener(null);
             }
-            attachHistoryTransferLongPress(
-                    rowView,
-                    transfer.hasPaid,
-                    () -> {
-                        toggleReceiptHistoryTransferPaidState(entry, transfer);
-                        bindReceiptHistoryTransfers(
-                                transfersLayout,
-                                entry,
-                                buildReceiptHistoryTransfers(entry)
-                        );
-                        historyEntriesAdapter.notifyDataSetChanged();
-                    }
-            );
             transfersLayout.addView(rowView);
         }
     }
@@ -543,6 +560,18 @@ public class HistoryActivity extends AppCompatActivity {
 
     @NonNull
     private ArrayList<ReceiptHistoryTransfer> buildReceiptHistoryTransfers(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry
+    ) {
+        ArrayList<ReceiptHistoryTransfer> reconstructedTransfers =
+                buildReconstructedReceiptHistoryTransfers(entry);
+        if (!entry.paymentCards.isEmpty()) {
+            return buildReceiptHistoryTransfersFromPaymentCards(entry, reconstructedTransfers);
+        }
+        return reconstructedTransfers;
+    }
+
+    @NonNull
+    private ArrayList<ReceiptHistoryTransfer> buildReconstructedReceiptHistoryTransfers(
             @NonNull ReceiptHistoryStore.HistoryEntry entry
     ) {
         LinkedHashMap<String, ReceiptHistoryStore.ParticipantShare> participantsByKey =
@@ -608,6 +637,7 @@ public class HistoryActivity extends AppCompatActivity {
         }
 
         ArrayList<ReceiptHistoryTransfer> transfers = new ArrayList<>();
+        int paymentCardIndex = 0;
         while (!creditors.isEmpty() && !debtors.isEmpty()) {
             creditors.sort((first, second) -> second.amount.compareTo(first.amount));
             debtors.sort((first, second) -> second.amount.compareTo(first.amount));
@@ -616,6 +646,17 @@ public class HistoryActivity extends AppCompatActivity {
             HistoryTransferBalance debtor = debtors.get(0);
             BigDecimal transferAmount = creditor.amount.min(debtor.amount)
                     .setScale(2, RoundingMode.HALF_UP);
+            ReceiptHistoryStore.PaymentCard paymentCard =
+                    paymentCardIndex < entry.paymentCards.size()
+                            ? entry.paymentCards.get(paymentCardIndex)
+                            : null;
+            String recipientPhoneNumber = paymentCard != null
+                    ? paymentCard.recipientPhoneNumber
+                    : creditor.participant.phoneNumber;
+            boolean hasPaid = paymentCard != null
+                    ? paymentCard.hasPaid
+                    : debtor.participant.hasPaid;
+            String paymentCardId = paymentCard != null ? paymentCard.id : "";
 
             transfers.add(new ReceiptHistoryTransfer(
                     getString(
@@ -627,12 +668,16 @@ public class HistoryActivity extends AppCompatActivity {
                             R.string.archive_summary_transfer_amount,
                             formatHistoryTransferAmount(transferAmount)
                     ),
-                    debtor.participant.hasPaid,
-                    isDefaultParticipant(debtor.participant) && !debtor.participant.hasPaid,
+                    hasPaid,
+                    isDefaultParticipant(debtor.participant)
+                            && !hasPaid
+                            && !normalizeWhitespace(recipientPhoneNumber).isEmpty(),
                     debtor.participant.key,
-                    creditor.participant.phoneNumber,
+                    paymentCardId,
+                    recipientPhoneNumber,
                     transferAmount
             ));
+            paymentCardIndex++;
 
             creditor.amount = creditor.amount.subtract(transferAmount);
             debtor.amount = debtor.amount.subtract(transferAmount);
@@ -643,6 +688,79 @@ public class HistoryActivity extends AppCompatActivity {
             if (debtor.amount.compareTo(BigDecimal.ZERO) == 0) {
                 debtors.remove(0);
             }
+        }
+
+        return transfers;
+    }
+
+    @NonNull
+    private ArrayList<ReceiptHistoryTransfer> buildReceiptHistoryTransfersFromPaymentCards(
+            @NonNull ReceiptHistoryStore.HistoryEntry entry,
+            @NonNull ArrayList<ReceiptHistoryTransfer> reconstructedTransfers
+    ) {
+        ArrayList<ReceiptHistoryTransfer> transfers = new ArrayList<>();
+        ReceiptHistoryStore.ParticipantShare defaultParticipant =
+                findDefaultHistoryParticipant(entry.participants);
+
+        for (int index = 0; index < entry.paymentCards.size(); index++) {
+            ReceiptHistoryStore.PaymentCard paymentCard = entry.paymentCards.get(index);
+            ReceiptHistoryTransfer reconstructedTransfer =
+                    index < reconstructedTransfers.size()
+                            ? reconstructedTransfers.get(index)
+                            : null;
+            ReceiptHistoryStore.ParticipantShare debtorParticipant =
+                    reconstructedTransfer == null
+                            ? null
+                            : findHistoryParticipantByKey(
+                                    entry.participants,
+                                    reconstructedTransfer.debtorParticipantKey
+                            );
+            ReceiptHistoryStore.ParticipantShare recipientParticipant =
+                    findHistoryParticipantByPhoneNumber(
+                            entry.participants,
+                            paymentCard.recipientPhoneNumber
+                    );
+            if (debtorParticipant == null
+                    && defaultParticipant != null
+                    && (recipientParticipant == null
+                    || !recipientParticipant.key.equals(defaultParticipant.key))) {
+                debtorParticipant = defaultParticipant;
+            }
+
+            String debtorName = debtorParticipant != null
+                    ? getHistoryParticipantDisplayName(debtorParticipant)
+                    : DEFAULT_PARTICIPANT_NAME;
+            String recipientName = getHistoryPaymentCardRecipientDisplayName(
+                    recipientParticipant,
+                    paymentCard.recipientPhoneNumber
+            );
+            String amountText = normalizeWhitespace(paymentCard.amount).isEmpty()
+                    ? reconstructedTransfer == null
+                            ? "0,00"
+                            : formatHistoryTransferAmount(reconstructedTransfer.amountValue)
+                    : paymentCard.amount;
+            BigDecimal amountValue = parseCurrencyAmount(amountText);
+
+            transfers.add(new ReceiptHistoryTransfer(
+                    getString(
+                            R.string.history_receipt_transfer_direction_arrow,
+                            debtorName,
+                            recipientName
+                    ),
+                    getString(
+                            R.string.archive_summary_transfer_amount,
+                            amountText
+                    ),
+                    paymentCard.hasPaid,
+                    debtorParticipant != null
+                            && isDefaultParticipant(debtorParticipant)
+                            && !paymentCard.hasPaid
+                            && !normalizeWhitespace(paymentCard.recipientPhoneNumber).isEmpty(),
+                    debtorParticipant == null ? "" : debtorParticipant.key,
+                    paymentCard.id,
+                    paymentCard.recipientPhoneNumber,
+                    amountValue
+            ));
         }
 
         return transfers;
@@ -740,19 +858,6 @@ public class HistoryActivity extends AppCompatActivity {
                 payNowButton.setVisibility(View.GONE);
                 payNowButton.setOnClickListener(null);
             }
-            attachHistoryTransferLongPress(
-                    rowView,
-                    transfer.hasPaid,
-                    () -> {
-                        toggleArchiveHistoryTransferPaidState(entry, transfer);
-                        bindArchiveSummaryHistoryTransfers(
-                                entry,
-                                transfersLayout,
-                                buildArchiveSummaryHistoryTransfers(entry)
-                        );
-                        historyEntriesAdapter.notifyDataSetChanged();
-                    }
-            );
             transfersLayout.addView(rowView);
         }
     }
@@ -1012,100 +1117,25 @@ public class HistoryActivity extends AppCompatActivity {
         }
     }
 
-    private void attachHistoryTransferLongPress(
-            @NonNull View rowView,
-            boolean hasPaid,
-            @NonNull Runnable toggleAction
-    ) {
-        rowView.setOnTouchListener(new View.OnTouchListener() {
-            private final int touchSlop = ViewConfiguration
-                    .get(HistoryActivity.this)
-                    .getScaledTouchSlop();
-            private float downX;
-            private float downY;
-            private float downRawX;
-            private float downRawY;
-            private boolean longPressTriggered;
-            private final Runnable longPressRunnable = () -> {
-                longPressTriggered = true;
-                vibrateForHistoryLongPress();
-                showHistoryTransferActionsMenu(
-                        rowView,
-                        downRawX,
-                        downRawY,
-                        hasPaid,
-                        toggleAction
-                );
-            };
-
-            @Override
-            public boolean onTouch(View view, MotionEvent event) {
-                switch (event.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        downX = event.getX();
-                        downY = event.getY();
-                        downRawX = event.getRawX();
-                        downRawY = event.getRawY();
-                        longPressTriggered = false;
-                        view.postDelayed(
-                                longPressRunnable,
-                                HISTORY_ENTRY_LONG_PRESS_DURATION_MS
-                        );
-                        return false;
-                    case MotionEvent.ACTION_MOVE:
-                        if (Math.abs(event.getX() - downX) > touchSlop
-                                || Math.abs(event.getY() - downY) > touchSlop) {
-                            view.removeCallbacks(longPressRunnable);
-                        }
-                        return false;
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
-                        view.removeCallbacks(longPressRunnable);
-                        return longPressTriggered;
-                    default:
-                        return false;
-                }
-            }
-        });
-    }
-
-    private void showHistoryTransferActionsMenu(
-            @NonNull View anchorView,
-            float rawTouchX,
-            float rawTouchY,
-            boolean hasPaid,
-            @NonNull Runnable toggleAction
-    ) {
-        AnchoredDropdownMenuHelper.showSingleActionMenu(
-                anchorView,
-                rawTouchX,
-                rawTouchY,
-                hasPaid ? R.string.mark_as_unpayed : R.string.mark_as_payed,
-                hasPaid ? R.drawable.ic_history_transfer_unpaid : R.drawable.ic_history_transfer_paid,
-                toggleAction
-        );
-    }
-
-    private void toggleReceiptHistoryTransferPaidState(
-            @NonNull ReceiptHistoryStore.HistoryEntry entry,
-            @NonNull ReceiptHistoryTransfer transfer
-    ) {
-        if (normalizeWhitespace(transfer.debtorParticipantKey).isEmpty()) {
-            return;
-        }
-        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.withParticipantPaidStatus(
-                entry,
-                transfer.debtorParticipantKey,
-                !transfer.hasPaid
-        );
-        persistUpdatedHistoryEntry(entry, updatedEntry);
-    }
-
     private void markReceiptHistoryTransferAsPaid(
             @NonNull ReceiptHistoryStore.HistoryEntry entry,
             @NonNull ReceiptHistoryTransfer transfer,
             @NonNull Runnable onPersisted
     ) {
+        if (!normalizeWhitespace(transfer.paymentCardId).isEmpty()) {
+            if (transfer.hasPaid) {
+                return;
+            }
+            ReceiptHistoryStore.HistoryEntry updatedEntry =
+                    ReceiptHistoryStore.withPaymentCardPaidStatus(
+                            entry,
+                            transfer.paymentCardId,
+                            true
+                    );
+            persistUpdatedHistoryEntry(entry, updatedEntry, onPersisted);
+            return;
+        }
+
         if (normalizeWhitespace(transfer.debtorParticipantKey).isEmpty() || transfer.hasPaid) {
             return;
         }
@@ -1115,21 +1145,6 @@ public class HistoryActivity extends AppCompatActivity {
                 true
         );
         persistUpdatedHistoryEntry(entry, updatedEntry, onPersisted);
-    }
-
-    private void toggleArchiveHistoryTransferPaidState(
-            @NonNull ReceiptHistoryStore.HistoryEntry entry,
-            @NonNull ArchiveSummaryHistoryTransfer transfer
-    ) {
-        if (transfer.sourceItem == null) {
-            return;
-        }
-        ReceiptHistoryStore.HistoryEntry updatedEntry = ReceiptHistoryStore.withHistoryItemPaidStatus(
-                entry,
-                transfer.sourceItem,
-                !transfer.hasPaid
-        );
-        persistUpdatedHistoryEntry(entry, updatedEntry);
     }
 
     private void markArchiveHistoryTransferAsPaid(
@@ -1410,6 +1425,58 @@ public class HistoryActivity extends AppCompatActivity {
             }
         }
         return null;
+    }
+
+    @Nullable
+    private ReceiptHistoryStore.ParticipantShare findHistoryParticipantByPhoneNumber(
+            @NonNull List<ReceiptHistoryStore.ParticipantShare> participants,
+            @Nullable String phoneNumber
+    ) {
+        String normalizedPhoneNumber = normalizePhoneNumberForSwish(phoneNumber);
+        if (normalizedPhoneNumber.isEmpty()) {
+            return null;
+        }
+
+        for (ReceiptHistoryStore.ParticipantShare participant : participants) {
+            String participantPhoneNumber = isDefaultParticipant(participant)
+                    ? AppSettings.getLoginPhoneNumber(this)
+                    : participant.phoneNumber;
+            if (normalizedPhoneNumber.equals(
+                    normalizePhoneNumberForSwish(participantPhoneNumber)
+            )) {
+                return participant;
+            }
+        }
+        return null;
+    }
+
+    @Nullable
+    private ReceiptHistoryStore.ParticipantShare findDefaultHistoryParticipant(
+            @NonNull List<ReceiptHistoryStore.ParticipantShare> participants
+    ) {
+        for (ReceiptHistoryStore.ParticipantShare participant : participants) {
+            if (isDefaultParticipant(participant)) {
+                return participant;
+            }
+        }
+        return null;
+    }
+
+    @NonNull
+    private String getHistoryPaymentCardRecipientDisplayName(
+            @Nullable ReceiptHistoryStore.ParticipantShare participant,
+            @Nullable String phoneNumber
+    ) {
+        if (participant != null) {
+            return getHistoryParticipantDisplayName(participant);
+        }
+
+        String normalizedPhoneNumber = normalizeWhitespace(phoneNumber);
+        if (!normalizedPhoneNumber.isEmpty()) {
+            return normalizedPhoneNumber;
+        }
+
+        return getString(R.string.participant_phone_unavailable);
     }
 
     @NonNull
@@ -1904,6 +1971,8 @@ public class HistoryActivity extends AppCompatActivity {
         targetEntry.items.addAll(sourceEntry.items);
         targetEntry.archivedReceipts.clear();
         targetEntry.archivedReceipts.addAll(sourceEntry.archivedReceipts);
+        targetEntry.paymentCards.clear();
+        targetEntry.paymentCards.addAll(sourceEntry.paymentCards);
     }
 
     @NonNull
@@ -2318,6 +2387,8 @@ public class HistoryActivity extends AppCompatActivity {
         @NonNull
         private final String debtorParticipantKey;
         @NonNull
+        private final String paymentCardId;
+        @NonNull
         private final String recipientPhoneNumber;
         @NonNull
         private final BigDecimal amountValue;
@@ -2328,6 +2399,7 @@ public class HistoryActivity extends AppCompatActivity {
                 boolean hasPaid,
                 boolean canPayNow,
                 @NonNull String debtorParticipantKey,
+                @NonNull String paymentCardId,
                 @NonNull String recipientPhoneNumber,
                 @NonNull BigDecimal amountValue
         ) {
@@ -2336,6 +2408,7 @@ public class HistoryActivity extends AppCompatActivity {
             this.hasPaid = hasPaid;
             this.canPayNow = canPayNow;
             this.debtorParticipantKey = debtorParticipantKey;
+            this.paymentCardId = paymentCardId;
             this.recipientPhoneNumber = recipientPhoneNumber;
             this.amountValue = amountValue;
         }

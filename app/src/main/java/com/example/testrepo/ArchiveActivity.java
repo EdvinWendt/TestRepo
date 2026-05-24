@@ -12,9 +12,11 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.net.ConnectivityManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.ContactsContract;
+import android.telephony.SmsManager;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -95,6 +97,7 @@ public class ArchiveActivity extends AppCompatActivity {
     private static final float ARCHIVE_TREE_EXPANDED_ROTATION_DEGREES = 90f;
     private static final String DEFAULT_PARTICIPANT_KEY = "participant_you";
     private static final String DEFAULT_PARTICIPANT_NAME = "You";
+    private static final String PAYMENT_LINK_BASE_URL = "https://edvinwendt.github.io/TestRepo/";
     @NonNull
     private String appliedThemeConfigurationKey = "";
 
@@ -118,9 +121,13 @@ public class ArchiveActivity extends AppCompatActivity {
     @Nullable
     private PopupWindow archivedReceiptItemPayerPopup;
     @Nullable
+    private PopupWindow sendRequestsNoInternetPopup;
+    @Nullable
     private ArchivedReceiptEditState pendingScanMoreEditState;
     @Nullable
     private Runnable pendingScanMoreRefreshRunnable;
+    @Nullable
+    private Runnable pendingSendRequestsAction;
     private boolean showAddParticipantDialogAfterContactsPermission;
     @Nullable
     private ExecutorService backgroundExecutor;
@@ -138,6 +145,20 @@ public class ArchiveActivity extends AppCompatActivity {
                         pendingAddParticipantRefreshRunnable,
                         isGranted
                 );
+            });
+    private final ActivityResultLauncher<String> requestSendSmsPermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
+                Runnable sendRequestsAction = pendingSendRequestsAction;
+                pendingSendRequestsAction = null;
+                if (isGranted && sendRequestsAction != null) {
+                    sendRequestsAction.run();
+                } else if (!isGranted) {
+                    Toast.makeText(
+                            this,
+                            R.string.send_requests_permission_required,
+                            Toast.LENGTH_SHORT
+                    ).show();
+                }
             });
     private final ActivityResultLauncher<Intent> scanMoreReceiptItemsLauncher =
             registerForActivityResult(
@@ -221,6 +242,48 @@ public class ArchiveActivity extends AppCompatActivity {
         ) {
             this.participant = participant;
             this.amount = amount;
+        }
+    }
+
+    private static final class ArchivedReceiptPaymentRequestTransfer {
+        @NonNull
+        private final ReceiptHistoryStore.ParticipantShare fromParticipant;
+        @NonNull
+        private final ReceiptHistoryStore.ParticipantShare toParticipant;
+        @NonNull
+        private final BigDecimal amount;
+        @NonNull
+        private final String paymentCardId;
+
+        private ArchivedReceiptPaymentRequestTransfer(
+                @NonNull ReceiptHistoryStore.ParticipantShare fromParticipant,
+                @NonNull ReceiptHistoryStore.ParticipantShare toParticipant,
+                @NonNull BigDecimal amount,
+                @NonNull String paymentCardId
+        ) {
+            this.fromParticipant = fromParticipant;
+            this.toParticipant = toParticipant;
+            this.amount = amount;
+            this.paymentCardId = paymentCardId;
+        }
+    }
+
+    private static final class ParticipantPaymentRequestLine {
+        @NonNull
+        private final String counterpartyName;
+        @NonNull
+        private final BigDecimal amount;
+        @Nullable
+        private final String paymentUrl;
+
+        private ParticipantPaymentRequestLine(
+                @NonNull String counterpartyName,
+                @NonNull BigDecimal amount,
+                @Nullable String paymentUrl
+        ) {
+            this.counterpartyName = counterpartyName;
+            this.amount = amount;
+            this.paymentUrl = paymentUrl;
         }
     }
 
@@ -315,6 +378,7 @@ public class ArchiveActivity extends AppCompatActivity {
         dismissArchivedReceiptSaveChangesDisabledReasonsPopup();
         dismissNewArchiveCreateDisabledReasonsPopup();
         dismissArchivedReceiptItemPayerPopup();
+        dismissSendRequestsNoInternetPopup();
         super.onDestroy();
         if (backgroundExecutor != null) {
             backgroundExecutor.shutdown();
@@ -781,7 +845,11 @@ public class ArchiveActivity extends AppCompatActivity {
         dialog.setContentView(dialogView);
         closeButton.setOnClickListener(view -> dialog.dismiss());
         archiveSummaryButton.setOnClickListener(
-                view -> showArchiveSummaryDialog(titleView.getText().toString(), archiveReceipts)
+                view -> showArchiveSummaryDialog(
+                        archiveIndex,
+                        titleView.getText().toString(),
+                        archiveReceipts
+                )
         );
         editButton.setOnClickListener(view -> showEditArchiveNameDialog(
                 archiveIndex,
@@ -816,7 +884,13 @@ public class ArchiveActivity extends AppCompatActivity {
                     archiveReceipts.set(receiptIndex, updatedEntry);
                     ArchiveStore.updateReceiptAt(this, archiveIndex, receiptIndex, updatedEntry);
                 },
-                onReceiptSaved
+                onReceiptSaved,
+                () -> removeArchiveReceipt(
+                        archiveIndex,
+                        receiptIndex,
+                        archiveReceipts,
+                        onReceiptSaved
+                )
         );
     }
 
@@ -833,6 +907,10 @@ public class ArchiveActivity extends AppCompatActivity {
                         updatedEntry
                 ),
                 () -> {
+                },
+                () -> {
+                    ArchiveStore.removeStandaloneReceiptAt(this, receiptIndex);
+                    loadArchiveNames();
                 }
         );
     }
@@ -840,7 +918,8 @@ public class ArchiveActivity extends AppCompatActivity {
     private void showArchivedReceiptDetailsDialog(
             @NonNull ReceiptHistoryStore.HistoryEntry entry,
             @NonNull OnArchiveReceiptSavedListener onArchiveReceiptSavedListener,
-            @NonNull Runnable onReceiptSaved
+            @NonNull Runnable onReceiptSaved,
+            @NonNull Runnable onReceiptSent
     ) {
         View dialogView = LayoutInflater.from(this)
                 .inflate(R.layout.dialog_archive_receipt_details, null);
@@ -946,7 +1025,7 @@ public class ArchiveActivity extends AppCompatActivity {
             onArchiveReceiptSavedListener.onArchiveReceiptSaved(updatedEntry);
             loadArchiveNames();
             onReceiptSaved.run();
-            showArchivedReceiptSummaryDialog(updatedEntry);
+            showArchivedReceiptSummaryDialog(updatedEntry, onReceiptSent);
         });
         dialog.show();
         if (dialog.getWindow() != null) {
@@ -958,6 +1037,7 @@ public class ArchiveActivity extends AppCompatActivity {
     }
 
     private void showArchiveSummaryDialog(
+            int archiveIndex,
             @NonNull String archiveName,
             @NonNull ArrayList<ReceiptHistoryStore.HistoryEntry> archiveReceipts
     ) {
@@ -965,6 +1045,10 @@ public class ArchiveActivity extends AppCompatActivity {
         View closeButton = dialogView.findViewById(R.id.button_close_archive_summary);
         MaterialButton sendRequestsButton =
                 dialogView.findViewById(R.id.button_archive_summary_send_requests);
+        AppCompatImageButton sendRequestsNoInternetInfoButton =
+                dialogView.findViewById(
+                        R.id.button_archive_summary_send_requests_no_internet_info
+                );
         LinearLayout transfersLayout =
                 dialogView.findViewById(R.id.layout_archive_summary_transfers);
         TextView emptyView = dialogView.findViewById(R.id.text_archive_summary_empty);
@@ -972,6 +1056,8 @@ public class ArchiveActivity extends AppCompatActivity {
                 dialogView.findViewById(R.id.input_layout_archive_summary_request_name);
         TextInputEditText requestNameInputView =
                 dialogView.findViewById(R.id.edit_archive_summary_request_name);
+        final ConnectivityManager.NetworkCallback[] networkCallbackHolder =
+                new ConnectivityManager.NetworkCallback[1];
 
         ArrayList<ArchiveSummaryTransfer> transfers =
                 buildArchiveSummaryTransfers(archiveReceipts);
@@ -1019,27 +1105,72 @@ public class ArchiveActivity extends AppCompatActivity {
             @Override
             public void afterTextChanged(Editable s) {
                 requestNameInputLayout.setError(null);
-                sendRequestsButton.setEnabled(
-                        hasPendingPayments
-                                && isArchiveSummaryRequestNameEntered(requestNameInputView)
+                updateArchivedReceiptSummarySendRequestsUi(
+                        sendRequestsButton,
+                        sendRequestsNoInternetInfoButton,
+                        hasPendingPayments,
+                        requestNameInputView
                 );
             }
         });
         requestNameInputLayout.setEnabled(hasPendingPayments);
         requestNameInputView.setEnabled(hasPendingPayments);
-        sendRequestsButton.setEnabled(
-                hasPendingPayments && isArchiveSummaryRequestNameEntered(requestNameInputView)
+        updateArchivedReceiptSummarySendRequestsUi(
+                sendRequestsButton,
+                sendRequestsNoInternetInfoButton,
+                hasPendingPayments,
+                requestNameInputView
         );
 
         Dialog dialog = new Dialog(this, AppSettings.getFullScreenDialogThemeResId(this));
         dialog.setContentView(dialogView);
-        closeButton.setOnClickListener(view -> dialog.dismiss());
+        dialog.setCancelable(true);
+        closeButton.setOnClickListener(view -> {
+            dismissSendRequestsNoInternetPopup();
+            dialog.dismiss();
+        });
+        sendRequestsNoInternetInfoButton.setOnClickListener(
+                view -> showSendRequestsNoInternetPopup(sendRequestsNoInternetInfoButton)
+        );
+        dialog.setOnDismissListener(dialogInterface -> {
+            dismissSendRequestsNoInternetPopup();
+            NetworkStateHelper.unregisterNetworkCallback(
+                    ArchiveActivity.this,
+                    networkCallbackHolder[0]
+            );
+        });
+        networkCallbackHolder[0] = NetworkStateHelper.registerDefaultNetworkCallback(
+                this,
+                () -> runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || !dialog.isShowing()) {
+                        return;
+                    }
+
+                    updateArchivedReceiptSummarySendRequestsUi(
+                            sendRequestsButton,
+                            sendRequestsNoInternetInfoButton,
+                            hasPendingPayments,
+                            requestNameInputView
+                    );
+                })
+        );
         sendRequestsButton.setOnClickListener(view -> {
+            if (!NetworkStateHelper.hasInternetConnection(this)) {
+                updateArchivedReceiptSummarySendRequestsUi(
+                        sendRequestsButton,
+                        sendRequestsNoInternetInfoButton,
+                        hasPendingPayments,
+                        requestNameInputView
+                );
+                return;
+            }
+
             if (!validateArchiveSummaryRequestName(requestNameInputLayout, requestNameInputView)) {
                 return;
             }
 
             showArchiveSummarySendRequestsConfirmationDialog(
+                    archiveIndex,
                     getText(requestNameInputView),
                     archiveReceipts,
                     dialog
@@ -1055,7 +1186,8 @@ public class ArchiveActivity extends AppCompatActivity {
     }
 
     private void showArchivedReceiptSummaryDialog(
-            @NonNull ReceiptHistoryStore.HistoryEntry receiptEntry
+            @NonNull ReceiptHistoryStore.HistoryEntry receiptEntry,
+            @NonNull Runnable onReceiptSent
     ) {
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_receipt_summary, null);
         LinearLayout transfersLayout =
@@ -1067,16 +1199,19 @@ public class ArchiveActivity extends AppCompatActivity {
                 dialogView.findViewById(R.id.edit_receipt_summary_receipt_name);
         View closeButton = dialogView.findViewById(R.id.button_close_receipt_summary);
         MaterialButton sendRequestsButton = dialogView.findViewById(R.id.button_send_requests);
+        AppCompatImageButton sendRequestsNoInternetInfoButton =
+                dialogView.findViewById(R.id.button_send_requests_no_internet_info);
+        final ConnectivityManager.NetworkCallback[] networkCallbackHolder =
+                new ConnectivityManager.NetworkCallback[1];
 
-        ArrayList<ReceiptHistoryStore.HistoryEntry> summaryReceipts = new ArrayList<>();
-        summaryReceipts.add(receiptEntry);
-        ArrayList<ArchiveSummaryTransfer> transfers = buildArchiveSummaryTransfers(summaryReceipts);
+        ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers =
+                buildArchivedReceiptPaymentRequestTransfers(receiptEntry);
         boolean hasPendingPayments = !transfers.isEmpty();
         if (transfers.isEmpty()) {
             emptyView.setVisibility(View.VISIBLE);
         } else {
             emptyView.setVisibility(View.GONE);
-            for (ArchiveSummaryTransfer transfer : transfers) {
+            for (ArchivedReceiptPaymentRequestTransfer transfer : transfers) {
                 View rowView = getLayoutInflater().inflate(
                         R.layout.item_archive_summary_transfer,
                         transfersLayout,
@@ -1088,8 +1223,8 @@ public class ArchiveActivity extends AppCompatActivity {
                         rowView.findViewById(R.id.text_archive_summary_transfer_amount);
                 directionView.setText(getString(
                         R.string.receipt_summary_transfer_direction_arrow,
-                        transfer.fromParticipantName,
-                        transfer.toParticipantName
+                        getArchiveSummaryParticipantDisplayName(transfer.fromParticipant),
+                        getArchiveSummaryParticipantDisplayName(transfer.toParticipant)
                 ));
                 amountView.setText(getString(
                         R.string.archive_summary_transfer_amount,
@@ -1115,30 +1250,76 @@ public class ArchiveActivity extends AppCompatActivity {
             @Override
             public void afterTextChanged(Editable s) {
                 requestNameInputLayout.setError(null);
-                sendRequestsButton.setEnabled(
-                        hasPendingPayments
-                                && isArchiveSummaryRequestNameEntered(requestNameInputView)
+                updateArchivedReceiptSummarySendRequestsUi(
+                        sendRequestsButton,
+                        sendRequestsNoInternetInfoButton,
+                        hasPendingPayments,
+                        requestNameInputView
                 );
             }
         });
         requestNameInputLayout.setEnabled(hasPendingPayments);
         requestNameInputView.setEnabled(hasPendingPayments);
-        sendRequestsButton.setEnabled(
-                hasPendingPayments && isArchiveSummaryRequestNameEntered(requestNameInputView)
+        updateArchivedReceiptSummarySendRequestsUi(
+                sendRequestsButton,
+                sendRequestsNoInternetInfoButton,
+                hasPendingPayments,
+                requestNameInputView
         );
 
         Dialog dialog = new Dialog(this, AppSettings.getFullScreenDialogThemeResId(this));
         dialog.setContentView(dialogView);
-        closeButton.setOnClickListener(view -> dialog.dismiss());
+        dialog.setCancelable(true);
+        closeButton.setOnClickListener(view -> {
+            dismissSendRequestsNoInternetPopup();
+            dialog.dismiss();
+        });
+        sendRequestsNoInternetInfoButton.setOnClickListener(
+                view -> showSendRequestsNoInternetPopup(sendRequestsNoInternetInfoButton)
+        );
+        dialog.setOnDismissListener(dialogInterface -> {
+            dismissSendRequestsNoInternetPopup();
+            NetworkStateHelper.unregisterNetworkCallback(
+                    ArchiveActivity.this,
+                    networkCallbackHolder[0]
+            );
+        });
+        networkCallbackHolder[0] = NetworkStateHelper.registerDefaultNetworkCallback(
+                this,
+                () -> runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || !dialog.isShowing()) {
+                        return;
+                    }
+
+                    updateArchivedReceiptSummarySendRequestsUi(
+                            sendRequestsButton,
+                            sendRequestsNoInternetInfoButton,
+                            hasPendingPayments,
+                            requestNameInputView
+                    );
+                })
+        );
         sendRequestsButton.setOnClickListener(view -> {
+            if (!NetworkStateHelper.hasInternetConnection(this)) {
+                updateArchivedReceiptSummarySendRequestsUi(
+                        sendRequestsButton,
+                        sendRequestsNoInternetInfoButton,
+                        hasPendingPayments,
+                        requestNameInputView
+                );
+                return;
+            }
+
             if (!validateArchiveSummaryRequestName(requestNameInputLayout, requestNameInputView)) {
                 return;
             }
 
-            showArchiveSummarySendRequestsConfirmationDialog(
+            showArchivedReceiptSendRequestsConfirmationDialog(
+                    dialog,
                     getText(requestNameInputView),
-                    summaryReceipts,
-                    dialog
+                    receiptEntry,
+                    transfers,
+                    onReceiptSent
             );
         });
         dialog.show();
@@ -1150,7 +1331,41 @@ public class ArchiveActivity extends AppCompatActivity {
         }
     }
 
+    private void showArchivedReceiptSendRequestsConfirmationDialog(
+            @NonNull Dialog summaryDialog,
+            @NonNull String requestName,
+            @NonNull ReceiptHistoryStore.HistoryEntry receiptEntry,
+            @NonNull ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers,
+            @NonNull Runnable onReceiptSent
+    ) {
+        View dialogView = getLayoutInflater().inflate(
+                R.layout.dialog_send_requests_confirmation,
+                null
+        );
+        MaterialButton noButton = dialogView.findViewById(R.id.button_send_requests_no);
+        MaterialButton yesButton = dialogView.findViewById(R.id.button_send_requests_yes);
+
+        AlertDialog confirmationDialog = new MaterialAlertDialogBuilder(this)
+                .setView(dialogView)
+                .create();
+
+        noButton.setOnClickListener(view -> confirmationDialog.dismiss());
+        yesButton.setOnClickListener(view -> {
+            confirmationDialog.dismiss();
+            summaryDialog.dismiss();
+            openArchivedReceiptSendRequestsFlow(
+                    requestName,
+                    receiptEntry,
+                    transfers,
+                    onReceiptSent
+            );
+        });
+
+        confirmationDialog.show();
+    }
+
     private void showArchiveSummarySendRequestsConfirmationDialog(
+            int archiveIndex,
             @NonNull String requestName,
             @NonNull ArrayList<ReceiptHistoryStore.HistoryEntry> archiveReceipts,
             @NonNull Dialog archiveSummaryDialog
@@ -1168,26 +1383,721 @@ public class ArchiveActivity extends AppCompatActivity {
 
         noButton.setOnClickListener(view -> confirmationDialog.dismiss());
         yesButton.setOnClickListener(view -> {
-            Context appContext = getApplicationContext();
-            SupabaseHistoryService.saveEntry(
-                    appContext,
-                    buildArchiveSummaryHistoryEntry(requestName, archiveReceipts),
-                    new SupabaseHistoryService.SimpleCallback() {
-                        @Override
-                        public void onSuccess() {
-                        }
-
-                        @Override
-                        public void onError(@NonNull String message) {
-                            Toast.makeText(appContext, message, Toast.LENGTH_SHORT).show();
-                        }
-                    }
-            );
             confirmationDialog.dismiss();
             archiveSummaryDialog.dismiss();
+            openArchiveSummarySendRequestsFlow(
+                    archiveIndex,
+                    requestName,
+                    new ArrayList<>(archiveReceipts)
+            );
         });
 
         confirmationDialog.show();
+    }
+
+    private void updateArchivedReceiptSummarySendRequestsUi(
+            @NonNull MaterialButton sendRequestsButton,
+            @NonNull AppCompatImageButton sendRequestsNoInternetInfoButton,
+            boolean hasPendingPayments,
+            @NonNull TextInputEditText requestNameInputView
+    ) {
+        boolean hasInternetConnection = NetworkStateHelper.hasInternetConnection(this);
+        sendRequestsButton.setEnabled(
+                hasPendingPayments
+                        && isArchiveSummaryRequestNameEntered(requestNameInputView)
+                        && hasInternetConnection
+        );
+        sendRequestsNoInternetInfoButton.setVisibility(
+                hasInternetConnection ? View.GONE : View.VISIBLE
+        );
+        if (hasInternetConnection) {
+            dismissSendRequestsNoInternetPopup();
+        }
+    }
+
+    private void showSendRequestsNoInternetPopup(@NonNull View anchorView) {
+        if (sendRequestsNoInternetPopup != null && sendRequestsNoInternetPopup.isShowing()) {
+            dismissSendRequestsNoInternetPopup();
+            return;
+        }
+
+        View popupView = getLayoutInflater().inflate(
+                R.layout.popup_header_help_message,
+                null
+        );
+        TextView messageView = popupView.findViewById(R.id.text_header_help_message);
+        messageView.setText(R.string.history_no_internet);
+
+        popupView.measure(
+                View.MeasureSpec.makeMeasureSpec(dpToPx(240), View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        );
+
+        PopupWindow popupWindow = new PopupWindow(
+                popupView,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                true
+        );
+        popupWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        popupWindow.setOutsideTouchable(true);
+        popupWindow.setElevation(dpToPx(10));
+        popupWindow.setOnDismissListener(() -> {
+            if (sendRequestsNoInternetPopup == popupWindow) {
+                sendRequestsNoInternetPopup = null;
+            }
+        });
+
+        Rect anchorBounds = new Rect();
+        anchorView.getGlobalVisibleRect(anchorBounds);
+        Rect visibleFrame = new Rect();
+        anchorView.getWindowVisibleDisplayFrame(visibleFrame);
+        int popupWidth = popupView.getMeasuredWidth();
+        int popupHeight = popupView.getMeasuredHeight();
+        int popupX = clamp(
+                anchorBounds.right - popupWidth,
+                visibleFrame.left,
+                Math.max(visibleFrame.left, visibleFrame.right - popupWidth)
+        );
+        int popupY = clamp(
+                anchorBounds.top - popupHeight - dpToPx(8),
+                visibleFrame.top,
+                Math.max(visibleFrame.top, visibleFrame.bottom - popupHeight)
+        );
+
+        popupWindow.showAtLocation(
+                anchorView.getRootView(),
+                Gravity.TOP | Gravity.START,
+                popupX,
+                popupY
+        );
+        sendRequestsNoInternetPopup = popupWindow;
+    }
+
+    private void dismissSendRequestsNoInternetPopup() {
+        if (sendRequestsNoInternetPopup == null) {
+            return;
+        }
+
+        sendRequestsNoInternetPopup.dismiss();
+        sendRequestsNoInternetPopup = null;
+    }
+
+    private boolean hasSendSmsPermission() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void openArchivedReceiptSendRequestsFlow(
+            @NonNull String requestName,
+            @NonNull ReceiptHistoryStore.HistoryEntry receiptEntry,
+            @NonNull ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers,
+            @NonNull Runnable onReceiptSent
+    ) {
+        if (!DeviceCapabilityHelper.supportsSms(this)) {
+            Toast.makeText(
+                    this,
+                    R.string.send_requests_not_supported,
+                    Toast.LENGTH_SHORT
+            ).show();
+            return;
+        }
+
+        Runnable sendRequestsAction = () -> sendArchivedReceiptPaymentRequests(
+                requestName,
+                receiptEntry,
+                transfers,
+                onReceiptSent
+        );
+        if (!hasSendSmsPermission()) {
+            pendingSendRequestsAction = sendRequestsAction;
+            requestSendSmsPermissionLauncher.launch(Manifest.permission.SEND_SMS);
+            return;
+        }
+
+        sendRequestsAction.run();
+    }
+
+    private void openArchiveSummarySendRequestsFlow(
+            int archiveIndex,
+            @NonNull String requestName,
+            @NonNull ArrayList<ReceiptHistoryStore.HistoryEntry> archiveReceipts
+    ) {
+        if (!DeviceCapabilityHelper.supportsSms(this)) {
+            Toast.makeText(
+                    this,
+                    R.string.send_requests_not_supported,
+                    Toast.LENGTH_SHORT
+            ).show();
+            return;
+        }
+
+        ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers =
+                buildArchiveSummaryPaymentRequestTransfers(archiveReceipts);
+        Runnable sendRequestsAction = () -> sendArchiveSummaryPaymentRequests(
+                archiveIndex,
+                requestName,
+                archiveReceipts,
+                transfers
+        );
+        if (!hasSendSmsPermission()) {
+            pendingSendRequestsAction = sendRequestsAction;
+            requestSendSmsPermissionLauncher.launch(Manifest.permission.SEND_SMS);
+            return;
+        }
+
+        sendRequestsAction.run();
+    }
+
+    private void sendArchivedReceiptPaymentRequests(
+            @NonNull String requestName,
+            @NonNull ReceiptHistoryStore.HistoryEntry receiptEntry,
+            @NonNull ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers,
+            @NonNull Runnable onReceiptSent
+    ) {
+        ReceiptHistoryStore.HistoryEntry historyEntry =
+                buildArchivedReceiptSendHistoryEntry(requestName, receiptEntry, transfers);
+        SupabaseHistoryService.saveEntry(
+                getApplicationContext(),
+                historyEntry,
+                new SupabaseHistoryService.EntryCallback() {
+                    @Override
+                    public void onSuccess(@NonNull ReceiptHistoryStore.HistoryEntry savedHistoryEntry) {
+                        sendArchivedReceiptPaymentRequestsWithHistoryId(
+                                savedHistoryEntry,
+                                historyEntry.receiptName,
+                                receiptEntry,
+                                transfers,
+                                onReceiptSent
+                        );
+                    }
+
+                    @Override
+                    public void onError(@NonNull String message) {
+                        Toast.makeText(
+                                ArchiveActivity.this,
+                                message,
+                                Toast.LENGTH_SHORT
+                        ).show();
+                    }
+                }
+        );
+    }
+
+    private void sendArchiveSummaryPaymentRequests(
+            int archiveIndex,
+            @NonNull String requestName,
+            @NonNull ArrayList<ReceiptHistoryStore.HistoryEntry> archiveReceipts,
+            @NonNull ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers
+    ) {
+        ReceiptHistoryStore.HistoryEntry historyEntry =
+                buildArchiveSummaryHistoryEntry(requestName, archiveReceipts);
+        ArrayList<ReceiptHistoryStore.ParticipantShare> summaryParticipants =
+                buildArchiveSummaryHistoryParticipants(archiveReceipts);
+        SupabaseHistoryService.saveEntry(
+                getApplicationContext(),
+                historyEntry,
+                new SupabaseHistoryService.EntryCallback() {
+                    @Override
+                    public void onSuccess(@NonNull ReceiptHistoryStore.HistoryEntry savedHistoryEntry) {
+                        sendArchiveSummaryPaymentRequestsWithHistoryId(
+                                archiveIndex,
+                                savedHistoryEntry,
+                                historyEntry.receiptName,
+                                summaryParticipants,
+                                transfers,
+                                archiveReceipts
+                        );
+                    }
+
+                    @Override
+                    public void onError(@NonNull String message) {
+                        Toast.makeText(
+                                ArchiveActivity.this,
+                                message,
+                                Toast.LENGTH_SHORT
+                        ).show();
+                    }
+                }
+        );
+    }
+
+    private void sendArchivedReceiptPaymentRequestsWithHistoryId(
+            @NonNull ReceiptHistoryStore.HistoryEntry savedHistoryEntry,
+            @NonNull String receiptName,
+            @NonNull ReceiptHistoryStore.HistoryEntry receiptEntry,
+            @NonNull ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers,
+            @NonNull Runnable onReceiptSent
+    ) {
+        String requestId = getHistoryEntryShortId(savedHistoryEntry);
+        SmsManager smsManager = SmsManager.getDefault();
+        int sentCount = 0;
+        int skippedCount = 0;
+
+        for (ReceiptHistoryStore.ParticipantShare participant : receiptEntry.participants) {
+            if (isDefaultParticipant(participant)) {
+                continue;
+            }
+
+            String phoneNumber = normalizeWhitespace(participant.phoneNumber);
+            if (!isValidPhoneNumber(phoneNumber)) {
+                skippedCount++;
+                continue;
+            }
+
+            String message = buildArchivedReceiptPaymentRequestMessage(
+                    participant,
+                    receiptName,
+                    transfers,
+                    requestId
+            );
+
+            try {
+                ArrayList<String> messageParts = smsManager.divideMessage(message);
+                if (messageParts.size() > 1) {
+                    smsManager.sendMultipartTextMessage(
+                            phoneNumber,
+                            null,
+                            messageParts,
+                            null,
+                            null
+                    );
+                } else {
+                    smsManager.sendTextMessage(phoneNumber, null, message, null, null);
+                }
+                sentCount++;
+            } catch (IllegalArgumentException | SecurityException exception) {
+                skippedCount++;
+            }
+        }
+
+        if (sentCount == 0) {
+            removeReceiptHistoryEntrySilently(savedHistoryEntry);
+            Toast.makeText(this, R.string.send_requests_none, Toast.LENGTH_SHORT).show();
+            returnToMainMenu();
+            return;
+        }
+
+        onReceiptSent.run();
+        int messageResId = skippedCount == 0
+                ? R.string.send_requests_success
+                : R.string.send_requests_partial;
+        Toast.makeText(
+                this,
+                getString(messageResId, sentCount, skippedCount),
+                Toast.LENGTH_SHORT
+        ).show();
+        returnToMainMenu();
+    }
+
+    private void sendArchiveSummaryPaymentRequestsWithHistoryId(
+            int archiveIndex,
+            @NonNull ReceiptHistoryStore.HistoryEntry savedHistoryEntry,
+            @NonNull String receiptName,
+            @NonNull ArrayList<ReceiptHistoryStore.ParticipantShare> summaryParticipants,
+            @NonNull ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers,
+            @NonNull ArrayList<ReceiptHistoryStore.HistoryEntry> archiveReceipts
+    ) {
+        String requestId = getHistoryEntryShortId(savedHistoryEntry);
+        SmsManager smsManager = SmsManager.getDefault();
+        int sentCount = 0;
+        int skippedCount = 0;
+
+        for (ReceiptHistoryStore.ParticipantShare participant : summaryParticipants) {
+            if (isDefaultParticipant(participant)) {
+                continue;
+            }
+
+            String phoneNumber = normalizeWhitespace(participant.phoneNumber);
+            if (!isValidPhoneNumber(phoneNumber)) {
+                skippedCount++;
+                continue;
+            }
+
+            String message = buildArchivedReceiptPaymentRequestMessage(
+                    participant,
+                    receiptName,
+                    transfers,
+                    requestId
+            );
+
+            try {
+                ArrayList<String> messageParts = smsManager.divideMessage(message);
+                if (messageParts.size() > 1) {
+                    smsManager.sendMultipartTextMessage(
+                            phoneNumber,
+                            null,
+                            messageParts,
+                            null,
+                            null
+                    );
+                } else {
+                    smsManager.sendTextMessage(phoneNumber, null, message, null, null);
+                }
+                sentCount++;
+            } catch (IllegalArgumentException | SecurityException exception) {
+                skippedCount++;
+            }
+        }
+
+        if (sentCount == 0) {
+            removeReceiptHistoryEntrySilently(savedHistoryEntry);
+            Toast.makeText(this, R.string.send_requests_none, Toast.LENGTH_SHORT).show();
+            returnToMainMenu();
+            return;
+        }
+
+        consumeArchiveSummaryReceipts(archiveIndex, archiveReceipts);
+        int messageResId = skippedCount == 0
+                ? R.string.send_requests_success
+                : R.string.send_requests_partial;
+        Toast.makeText(
+                this,
+                getString(messageResId, sentCount, skippedCount),
+                Toast.LENGTH_SHORT
+        ).show();
+        returnToMainMenu();
+    }
+
+    @NonNull
+    private String buildArchivedReceiptPaymentRequestMessage(
+            @NonNull ReceiptHistoryStore.ParticipantShare participant,
+            @NonNull String receiptName,
+            @NonNull ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers,
+            @NonNull String requestId
+    ) {
+        ArrayList<ParticipantPaymentRequestLine> outgoingLines = new ArrayList<>();
+        ArrayList<ParticipantPaymentRequestLine> incomingLines = new ArrayList<>();
+
+        for (ArchivedReceiptPaymentRequestTransfer transfer : transfers) {
+            if (transfer.fromParticipant.key.equals(participant.key)) {
+                outgoingLines.add(new ParticipantPaymentRequestLine(
+                        getArchiveParticipantExternalDisplayName(transfer.toParticipant),
+                        transfer.amount,
+                        buildPaymentRequestUrlOrNull(
+                                resolveArchiveParticipantPaymentLinkPhoneNumber(transfer.toParticipant),
+                                requestId,
+                                transfer.paymentCardId
+                        )
+                ));
+            } else if (transfer.toParticipant.key.equals(participant.key)) {
+                incomingLines.add(new ParticipantPaymentRequestLine(
+                        getArchiveParticipantExternalDisplayName(transfer.fromParticipant),
+                        transfer.amount,
+                        null
+                ));
+            }
+        }
+
+        StringBuilder messageBuilder = new StringBuilder(getString(
+                R.string.participant_payment_request_intro,
+                getArchiveParticipantExternalDisplayName(participant),
+                receiptName
+        ));
+
+        if (outgoingLines.isEmpty() && incomingLines.isEmpty()) {
+            messageBuilder.append("\n\n")
+                    .append(getString(R.string.participant_payment_request_none));
+            return messageBuilder.toString();
+        }
+
+        if (!outgoingLines.isEmpty()) {
+            messageBuilder.append("\n\n")
+                    .append(getString(R.string.participant_payment_request_section_pay))
+                    .append('\n');
+            appendOutgoingParticipantPaymentRequestLines(messageBuilder, outgoingLines);
+        }
+
+        if (!incomingLines.isEmpty()) {
+            messageBuilder.append("\n\n")
+                    .append(getString(R.string.participant_payment_request_section_receive))
+                    .append('\n');
+            appendIncomingParticipantPaymentRequestLines(messageBuilder, incomingLines);
+        }
+
+        return messageBuilder.toString();
+    }
+
+    private void appendOutgoingParticipantPaymentRequestLines(
+            @NonNull StringBuilder messageBuilder,
+            @NonNull ArrayList<ParticipantPaymentRequestLine> requestLines
+    ) {
+        for (int index = 0; index < requestLines.size(); index++) {
+            if (index > 0) {
+                messageBuilder.append("\n\n");
+            }
+
+            ParticipantPaymentRequestLine requestLine = requestLines.get(index);
+            messageBuilder.append(requestLine.counterpartyName)
+                    .append(' ')
+                    .append(formatCurrency(requestLine.amount))
+                    .append("kr");
+
+            if (requestLine.paymentUrl != null && !requestLine.paymentUrl.isEmpty()) {
+                messageBuilder.append('\n')
+                        .append(requestLine.paymentUrl);
+            }
+        }
+    }
+
+    private void appendIncomingParticipantPaymentRequestLines(
+            @NonNull StringBuilder messageBuilder,
+            @NonNull ArrayList<ParticipantPaymentRequestLine> requestLines
+    ) {
+        for (int index = 0; index < requestLines.size(); index++) {
+            if (index > 0) {
+                messageBuilder.append("\n\n");
+            }
+
+            ParticipantPaymentRequestLine requestLine = requestLines.get(index);
+            messageBuilder.append(formatCurrency(requestLine.amount))
+                    .append("kr from ")
+                    .append(requestLine.counterpartyName);
+        }
+    }
+
+    @NonNull
+    private ArrayList<ArchivedReceiptPaymentRequestTransfer> buildArchivedReceiptPaymentRequestTransfers(
+            @NonNull ReceiptHistoryStore.HistoryEntry receiptEntry
+    ) {
+        ArrayList<ReceiptHistoryStore.HistoryEntry> summaryReceipts = new ArrayList<>();
+        summaryReceipts.add(receiptEntry);
+        ArrayList<ArchiveSummaryTransfer> summaryTransfers =
+                buildArchiveSummaryTransfers(summaryReceipts);
+        LinkedHashMap<String, ReceiptHistoryStore.ParticipantShare> participantsByKey =
+                new LinkedHashMap<>();
+        for (ReceiptHistoryStore.ParticipantShare participant : receiptEntry.participants) {
+            participantsByKey.put(participant.key, participant);
+        }
+
+        ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers = new ArrayList<>();
+        for (ArchiveSummaryTransfer summaryTransfer : summaryTransfers) {
+            ReceiptHistoryStore.ParticipantShare fromParticipant =
+                    participantsByKey.get(summaryTransfer.fromParticipantKey);
+            ReceiptHistoryStore.ParticipantShare toParticipant =
+                    participantsByKey.get(summaryTransfer.toParticipantKey);
+            if (fromParticipant == null || toParticipant == null) {
+                continue;
+            }
+
+            transfers.add(new ArchivedReceiptPaymentRequestTransfer(
+                    fromParticipant,
+                    toParticipant,
+                    summaryTransfer.amount,
+                    ReceiptHistoryStore.buildPaymentCardId(transfers.size())
+            ));
+        }
+        return transfers;
+    }
+
+    @NonNull
+    private ArrayList<ArchivedReceiptPaymentRequestTransfer> buildArchiveSummaryPaymentRequestTransfers(
+            @NonNull List<ReceiptHistoryStore.HistoryEntry> archiveReceipts
+    ) {
+        ArrayList<ArchiveSummaryTransfer> summaryTransfers =
+                buildArchiveSummaryTransfers(archiveReceipts);
+        LinkedHashMap<String, ReceiptHistoryStore.ParticipantShare> participantsByKey =
+                new LinkedHashMap<>();
+        for (ReceiptHistoryStore.HistoryEntry receipt : archiveReceipts) {
+            for (ReceiptHistoryStore.ParticipantShare participant : receipt.participants) {
+                participantsByKey.putIfAbsent(participant.key, participant);
+            }
+        }
+
+        ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers = new ArrayList<>();
+        for (int index = 0; index < summaryTransfers.size(); index++) {
+            ArchiveSummaryTransfer summaryTransfer = summaryTransfers.get(index);
+            ReceiptHistoryStore.ParticipantShare fromParticipant =
+                    participantsByKey.get(summaryTransfer.fromParticipantKey);
+            ReceiptHistoryStore.ParticipantShare toParticipant =
+                    participantsByKey.get(summaryTransfer.toParticipantKey);
+            if (fromParticipant == null || toParticipant == null) {
+                continue;
+            }
+
+            transfers.add(new ArchivedReceiptPaymentRequestTransfer(
+                    fromParticipant,
+                    toParticipant,
+                    summaryTransfer.amount,
+                    ReceiptHistoryStore.buildPaymentCardId(index)
+            ));
+        }
+        return transfers;
+    }
+
+    @NonNull
+    private ReceiptHistoryStore.HistoryEntry buildArchivedReceiptSendHistoryEntry(
+            @NonNull String requestName,
+            @NonNull ReceiptHistoryStore.HistoryEntry receiptEntry,
+            @NonNull ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers
+    ) {
+        String normalizedRequestName = normalizeWhitespace(requestName);
+        return new ReceiptHistoryStore.HistoryEntry(
+                normalizedRequestName.isEmpty() ? receiptEntry.receiptName : normalizedRequestName,
+                receiptEntry.totalAmount,
+                getCurrentArchiveHistoryDate(),
+                "",
+                copyArchivedReceiptHistoryParticipants(receiptEntry.participants),
+                copyArchivedReceiptHistoryItems(receiptEntry.items),
+                ReceiptHistoryStore.ENTRY_TYPE_RECEIPT,
+                new ArrayList<>(),
+                buildArchivedReceiptSendHistoryPaymentCards(transfers)
+        );
+    }
+
+    @NonNull
+    private ArrayList<ReceiptHistoryStore.ParticipantShare> copyArchivedReceiptHistoryParticipants(
+            @NonNull List<ReceiptHistoryStore.ParticipantShare> participants
+    ) {
+        ArrayList<ReceiptHistoryStore.ParticipantShare> copiedParticipants = new ArrayList<>();
+        for (ReceiptHistoryStore.ParticipantShare participant : participants) {
+            copiedParticipants.add(new ReceiptHistoryStore.ParticipantShare(
+                    participant.key,
+                    participant.name,
+                    participant.initials,
+                    participant.color,
+                    participant.phoneNumber,
+                    participant.amount,
+                    participant.isCrowned,
+                    participant.hasPaid
+            ));
+        }
+        return copiedParticipants;
+    }
+
+    @NonNull
+    private ArrayList<ReceiptHistoryStore.HistoryItem> copyArchivedReceiptHistoryItems(
+            @NonNull List<ReceiptHistoryStore.HistoryItem> items
+    ) {
+        ArrayList<ReceiptHistoryStore.HistoryItem> copiedItems = new ArrayList<>();
+        for (ReceiptHistoryStore.HistoryItem item : items) {
+            copiedItems.add(new ReceiptHistoryStore.HistoryItem(
+                    item.name,
+                    item.price,
+                    item.payerParticipantKey,
+                    new ArrayList<>(item.selectedParticipantKeys)
+            ));
+        }
+        return copiedItems;
+    }
+
+    @NonNull
+    private ArrayList<ReceiptHistoryStore.PaymentCard> buildArchivedReceiptSendHistoryPaymentCards(
+            @NonNull ArrayList<ArchivedReceiptPaymentRequestTransfer> transfers
+    ) {
+        ArrayList<ReceiptHistoryStore.PaymentCard> paymentCards = new ArrayList<>();
+        for (ArchivedReceiptPaymentRequestTransfer transfer : transfers) {
+            paymentCards.add(new ReceiptHistoryStore.PaymentCard(
+                    transfer.paymentCardId,
+                    formatCurrency(transfer.amount),
+                    resolveArchiveParticipantPaymentLinkPhoneNumber(transfer.toParticipant),
+                    false
+            ));
+        }
+        return paymentCards;
+    }
+
+    @Nullable
+    private String buildPaymentRequestUrlOrNull(
+            @NonNull String phoneNumber,
+            @NonNull String requestId,
+            @NonNull String paymentCardId
+    ) {
+        if (!isValidPhoneNumber(phoneNumber)
+                || requestId.isEmpty()
+                || paymentCardId.isEmpty()) {
+            return null;
+        }
+        return buildPaymentRequestUrl(requestId, paymentCardId);
+    }
+
+    @NonNull
+    private String buildPaymentRequestUrl(
+            @NonNull String requestId,
+            @NonNull String paymentCardId
+    ) {
+        return android.net.Uri.parse(PAYMENT_LINK_BASE_URL)
+                .buildUpon()
+                .appendQueryParameter("R", requestId)
+                .appendQueryParameter("PC", paymentCardId)
+                .build()
+                .toString();
+    }
+
+    @NonNull
+    private String getHistoryEntryShortId(@NonNull ReceiptHistoryStore.HistoryEntry historyEntry) {
+        String storageId = normalizeWhitespace(historyEntry.storageId);
+        if (storageId.isEmpty()) {
+            return "";
+        }
+        return storageId.substring(0, Math.min(8, storageId.length()));
+    }
+
+    private void removeReceiptHistoryEntrySilently(
+            @NonNull ReceiptHistoryStore.HistoryEntry historyEntry
+    ) {
+        if (historyEntry.storageId.isEmpty()) {
+            return;
+        }
+
+        SupabaseHistoryService.removeEntry(
+                getApplicationContext(),
+                historyEntry,
+                new SupabaseHistoryService.SimpleCallback() {
+                    @Override
+                    public void onSuccess() {
+                    }
+
+                    @Override
+                    public void onError(@NonNull String message) {
+                    }
+                }
+        );
+    }
+
+    @NonNull
+    private String resolveArchiveParticipantPaymentLinkPhoneNumber(
+            @NonNull ReceiptHistoryStore.ParticipantShare participant
+    ) {
+        return resolveHistoryPaymentCardPhoneNumber(participant);
+    }
+
+    @NonNull
+    private String getArchiveParticipantExternalDisplayName(
+            @NonNull ReceiptHistoryStore.ParticipantShare participant
+    ) {
+        if (isDefaultParticipant(participant)) {
+            String username = normalizeWhitespace(AppSettings.getUsernameNickname(this));
+            return username.isEmpty() ? DEFAULT_PARTICIPANT_NAME : username;
+        }
+        return participant.name;
+    }
+
+    private void consumeArchiveSummaryReceipts(
+            int archiveIndex,
+            @NonNull ArrayList<ReceiptHistoryStore.HistoryEntry> archiveReceipts
+    ) {
+        if (archiveIndex < 0) {
+            return;
+        }
+
+        for (int receiptIndex = archiveReceipts.size() - 1; receiptIndex >= 0; receiptIndex--) {
+            ArchiveStore.removeReceiptAt(this, archiveIndex, receiptIndex);
+        }
+        archiveReceipts.clear();
+
+        ArchiveStore.Archive updatedArchive = ArchiveStore.loadArchiveAt(this, archiveIndex);
+        if (updatedArchive == null || updatedArchive.receipts.isEmpty()) {
+            ArchiveStore.removeArchiveAt(this, archiveIndex);
+        }
+        loadArchiveNames();
+    }
+
+    private void returnToMainMenu() {
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
+        finish();
     }
 
     @NonNull
@@ -1255,7 +2165,8 @@ public class ArchiveActivity extends AppCompatActivity {
                 buildArchiveSummaryHistoryParticipants(archiveReceipts),
                 buildArchiveSummaryHistoryItems(transfers),
                 ReceiptHistoryStore.ENTRY_TYPE_ARCHIVE_SUMMARY,
-                copyArchiveSummaryHistoryReceipts(archiveReceipts)
+                copyArchiveSummaryHistoryReceipts(archiveReceipts),
+                buildArchiveSummaryHistoryPaymentCards(transfers, archiveReceipts)
         );
     }
 
@@ -1297,7 +2208,9 @@ public class ArchiveActivity extends AppCompatActivity {
                     receipt.message,
                     copiedParticipants,
                     copiedItems,
-                    receipt.entryType
+                    receipt.entryType,
+                    new ArrayList<>(),
+                    buildReceiptHistoryPaymentCards(receipt)
             ));
         }
         return copiedReceipts;
@@ -1354,6 +2267,164 @@ public class ArchiveActivity extends AppCompatActivity {
             ));
         }
         return items;
+    }
+
+    @NonNull
+    private ArrayList<ReceiptHistoryStore.PaymentCard> buildArchiveSummaryHistoryPaymentCards(
+            @NonNull List<ArchiveSummaryTransfer> transfers,
+            @NonNull List<ReceiptHistoryStore.HistoryEntry> archiveReceipts
+    ) {
+        LinkedHashMap<String, ReceiptHistoryStore.ParticipantShare> participantsByKey =
+                new LinkedHashMap<>();
+        for (ReceiptHistoryStore.HistoryEntry receipt : archiveReceipts) {
+            for (ReceiptHistoryStore.ParticipantShare participant : receipt.participants) {
+                participantsByKey.putIfAbsent(participant.key, participant);
+            }
+        }
+
+        ArrayList<ReceiptHistoryStore.PaymentCard> paymentCards = new ArrayList<>();
+        for (int index = 0; index < transfers.size(); index++) {
+            ArchiveSummaryTransfer transfer = transfers.get(index);
+            ReceiptHistoryStore.ParticipantShare senderParticipant =
+                    participantsByKey.get(transfer.fromParticipantKey);
+            ReceiptHistoryStore.ParticipantShare recipientParticipant =
+                    participantsByKey.get(transfer.toParticipantKey);
+            paymentCards.add(new ReceiptHistoryStore.PaymentCard(
+                    ReceiptHistoryStore.buildPaymentCardId(index),
+                    formatCurrency(transfer.amount),
+                    resolveHistoryPaymentCardPhoneNumber(recipientParticipant),
+                    transfer.hasPaid
+            ));
+        }
+        return paymentCards;
+    }
+
+    @NonNull
+    private ArrayList<ReceiptHistoryStore.PaymentCard> buildReceiptHistoryPaymentCards(
+            @NonNull ReceiptHistoryStore.HistoryEntry receipt
+    ) {
+        LinkedHashMap<String, ReceiptHistoryStore.ParticipantShare> participantsByKey =
+                new LinkedHashMap<>();
+        LinkedHashMap<String, BigDecimal> balancesByKey = new LinkedHashMap<>();
+        for (ReceiptHistoryStore.ParticipantShare participant : receipt.participants) {
+            participantsByKey.put(participant.key, participant);
+            balancesByKey.put(participant.key, BigDecimal.ZERO);
+        }
+
+        ReceiptHistoryStore.ParticipantShare defaultPayer = findArchiveSummaryPayer(receipt);
+        if (defaultPayer != null) {
+            participantsByKey.putIfAbsent(defaultPayer.key, defaultPayer);
+            balancesByKey.putIfAbsent(defaultPayer.key, BigDecimal.ZERO);
+        }
+
+        for (ReceiptHistoryStore.HistoryItem item : receipt.items) {
+            ReceiptHistoryStore.ParticipantShare itemPayer =
+                    findArchiveSummaryItemPayer(item, receipt, defaultPayer);
+            if (itemPayer == null) {
+                continue;
+            }
+
+            participantsByKey.putIfAbsent(itemPayer.key, itemPayer);
+            balancesByKey.putIfAbsent(itemPayer.key, BigDecimal.ZERO);
+
+            int selectedParticipantCount =
+                    countArchivedReceiptSelectedParticipants(item, receipt.participants);
+            if (selectedParticipantCount == 0) {
+                continue;
+            }
+
+            BigDecimal itemAmount = parseCurrencyAmount(item.price);
+            BigDecimal sharedAmount = itemAmount.divide(
+                    BigDecimal.valueOf(selectedParticipantCount),
+                    2,
+                    RoundingMode.HALF_UP
+            );
+
+            for (ReceiptHistoryStore.ParticipantShare participant : receipt.participants) {
+                if (!item.isParticipantSelected(participant.key)
+                        || participant.key.equals(itemPayer.key)) {
+                    continue;
+                }
+
+                balancesByKey.put(
+                        itemPayer.key,
+                        balancesByKey.get(itemPayer.key).add(sharedAmount)
+                );
+                balancesByKey.put(
+                        participant.key,
+                        balancesByKey.get(participant.key).subtract(sharedAmount)
+                );
+            }
+        }
+
+        ArrayList<ArchiveSummaryBalance> creditors = new ArrayList<>();
+        ArrayList<ArchiveSummaryBalance> debtors = new ArrayList<>();
+        for (String participantKey : balancesByKey.keySet()) {
+            BigDecimal balance = balancesByKey.get(participantKey).setScale(2, RoundingMode.HALF_UP);
+            if (balance.compareTo(BigDecimal.ZERO) > 0) {
+                creditors.add(new ArchiveSummaryBalance(
+                        participantsByKey.get(participantKey),
+                        balance
+                ));
+            } else if (balance.compareTo(BigDecimal.ZERO) < 0) {
+                debtors.add(new ArchiveSummaryBalance(
+                        participantsByKey.get(participantKey),
+                        balance.abs()
+                ));
+            }
+        }
+
+        ArrayList<ReceiptHistoryStore.PaymentCard> paymentCards = new ArrayList<>();
+        int paymentCardIndex = 0;
+        while (!creditors.isEmpty() && !debtors.isEmpty()) {
+            creditors.sort((first, second) -> second.amount.compareTo(first.amount));
+            debtors.sort((first, second) -> second.amount.compareTo(first.amount));
+
+            ArchiveSummaryBalance creditor = creditors.get(0);
+            ArchiveSummaryBalance debtor = debtors.get(0);
+            BigDecimal transferAmount = creditor.amount.min(debtor.amount)
+                    .setScale(2, RoundingMode.HALF_UP);
+
+            paymentCards.add(new ReceiptHistoryStore.PaymentCard(
+                    ReceiptHistoryStore.buildPaymentCardId(paymentCardIndex),
+                    formatCurrency(transferAmount),
+                    resolveHistoryPaymentCardPhoneNumber(creditor.participant),
+                    debtor.participant.hasPaid
+            ));
+            paymentCardIndex++;
+
+            creditor.amount = creditor.amount.subtract(transferAmount);
+            debtor.amount = debtor.amount.subtract(transferAmount);
+
+            if (creditor.amount.compareTo(BigDecimal.ZERO) == 0) {
+                creditors.remove(0);
+            }
+            if (debtor.amount.compareTo(BigDecimal.ZERO) == 0) {
+                debtors.remove(0);
+            }
+        }
+
+        return paymentCards;
+    }
+
+    @NonNull
+    private String resolveHistoryPaymentCardPhoneNumber(
+            @Nullable ReceiptHistoryStore.ParticipantShare participant
+    ) {
+        if (participant == null) {
+            return "";
+        }
+
+        String phoneNumber = normalizeWhitespace(participant.phoneNumber);
+        if (!phoneNumber.isEmpty()) {
+            return phoneNumber;
+        }
+
+        if (isDefaultParticipant(participant)) {
+            return normalizeWhitespace(AppSettings.getLoginPhoneNumber(this));
+        }
+
+        return "";
     }
 
     @NonNull
@@ -5032,6 +6103,10 @@ public class ArchiveActivity extends AppCompatActivity {
         ));
     }
 
+    private int clamp(int value, int minValue, int maxValue) {
+        return Math.max(minValue, Math.min(maxValue, value));
+    }
+
     private void setMenuExpanded(@Nullable AppCompatImageButton button, boolean expanded) {
         if (button == null) {
             return;
@@ -5139,7 +6214,11 @@ public class ArchiveActivity extends AppCompatActivity {
         emptyView.setVisibility(View.GONE);
         summaryButton.setVisibility(View.VISIBLE);
         summaryButton.setOnClickListener(
-                view -> showArchiveSummaryDialog(archiveName, archiveReceipts)
+                view -> showArchiveSummaryDialog(
+                        archiveIndex,
+                        archiveName,
+                        archiveReceipts
+                )
         );
         LayoutInflater inflater = LayoutInflater.from(this);
         for (int index = 0; index < archiveReceipts.size(); index++) {

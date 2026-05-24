@@ -5010,9 +5010,8 @@ public class NewReceiptActivity extends AppCompatActivity {
                         transfer.amount,
                         buildPaymentRequestUrlOrNull(
                                 resolveParticipantPaymentLinkPhoneNumber(payeeParticipant),
-                                transfer.amount,
-                                receiptName,
-                                requestId
+                                requestId,
+                                transfer.paymentCardId
                         )
                 ));
             } else if (transfer.toParticipant.key.equals(participant.key)) {
@@ -5094,14 +5093,15 @@ public class NewReceiptActivity extends AppCompatActivity {
     @Nullable
     private String buildPaymentRequestUrlOrNull(
             @NonNull String phoneNumber,
-            @NonNull BigDecimal amount,
-            @NonNull String message,
-            @NonNull String requestId
+            @NonNull String requestId,
+            @NonNull String paymentCardId
     ) {
-        if (!isValidPhoneNumber(phoneNumber)) {
+        if (!isValidPhoneNumber(phoneNumber)
+                || requestId.isEmpty()
+                || paymentCardId.isEmpty()) {
             return null;
         }
-        return buildPaymentRequestUrl(phoneNumber, amount, message, requestId);
+        return buildPaymentRequestUrl(requestId, paymentCardId);
     }
 
     @NonNull
@@ -5139,20 +5139,15 @@ public class NewReceiptActivity extends AppCompatActivity {
 
     @NonNull
     private String buildPaymentRequestUrl(
-            @NonNull String phoneNumber,
-            @NonNull BigDecimal amount,
-            @NonNull String message,
-            @NonNull String requestId
+            @NonNull String requestId,
+            @NonNull String paymentCardId
     ) {
-        Uri.Builder builder = Uri.parse(PAYMENT_LINK_BASE_URL)
+        return Uri.parse(PAYMENT_LINK_BASE_URL)
                 .buildUpon()
-                .appendQueryParameter("Phone", normalizePhoneNumber(phoneNumber))
-                .appendQueryParameter("Amount", formatUrlAmount(amount))
-                .appendQueryParameter("Message", message);
-        if (!requestId.isEmpty()) {
-            builder.appendQueryParameter("ID", requestId);
-        }
-        return builder.build().toString();
+                .appendQueryParameter("R", requestId)
+                .appendQueryParameter("PC", paymentCardId)
+                .build()
+                .toString();
     }
 
     @NonNull
@@ -5184,13 +5179,6 @@ public class NewReceiptActivity extends AppCompatActivity {
                     }
                 }
         );
-    }
-
-    @NonNull
-    private String formatUrlAmount(@NonNull BigDecimal amount) {
-        return amount.setScale(2, RoundingMode.HALF_UP)
-                .stripTrailingZeros()
-                .toPlainString();
     }
 
     @NonNull
@@ -5288,7 +5276,8 @@ public class NewReceiptActivity extends AppCompatActivity {
                     creditor.participant,
                     getReceiptSummaryParticipantDisplayName(debtor.participant),
                     getReceiptSummaryParticipantDisplayName(creditor.participant),
-                    transferAmount
+                    transferAmount,
+                    ReceiptHistoryStore.buildPaymentCardId(transfers.size())
             ));
 
             creditor.amount = creditor.amount.subtract(transferAmount);
@@ -5408,8 +5397,26 @@ public class NewReceiptActivity extends AppCompatActivity {
                 getCurrentHistoryDate(),
                 customMessage,
                 buildHistoryParticipants(),
-                buildHistoryItems()
+                buildHistoryItems(),
+                ReceiptHistoryStore.ENTRY_TYPE_RECEIPT,
+                new ArrayList<>(),
+                buildHistoryPaymentCards()
         );
+    }
+
+    @NonNull
+    private ArrayList<ReceiptHistoryStore.PaymentCard> buildHistoryPaymentCards() {
+        ArrayList<ReceiptHistoryStore.PaymentCard> paymentCards = new ArrayList<>();
+        ArrayList<ReceiptSummaryTransfer> transfers = buildReceiptSummaryTransfers();
+        for (ReceiptSummaryTransfer transfer : transfers) {
+            paymentCards.add(new ReceiptHistoryStore.PaymentCard(
+                    transfer.paymentCardId,
+                    formatCurrency(transfer.amount),
+                    resolveParticipantPaymentLinkPhoneNumber(transfer.toParticipant),
+                    false
+            ));
+        }
+        return paymentCards;
     }
 
     private void saveReceiptHistoryEntry(
@@ -6498,19 +6505,23 @@ public class NewReceiptActivity extends AppCompatActivity {
         private final String toParticipantName;
         @NonNull
         private final BigDecimal amount;
+        @NonNull
+        private final String paymentCardId;
 
         private ReceiptSummaryTransfer(
                 @NonNull Participant fromParticipant,
                 @NonNull Participant toParticipant,
                 @NonNull String fromParticipantName,
                 @NonNull String toParticipantName,
-                @NonNull BigDecimal amount
+                @NonNull BigDecimal amount,
+                @NonNull String paymentCardId
         ) {
             this.fromParticipant = fromParticipant;
             this.toParticipant = toParticipant;
             this.fromParticipantName = fromParticipantName;
             this.toParticipantName = toParticipantName;
             this.amount = amount;
+            this.paymentCardId = paymentCardId;
         }
     }
 

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Receipt Scanner</string>
-    <string name="home_title">Receipt Scanner</string>
+    <string name="app_name">Kvitt</string>
+    <string name="home_title">Kvitt</string>
     <string name="home_subtitle">Choose what you want to do from the main menu.</string>
     <string name="abandon_receipt_title">Abandon Receipt?</string>
     <string name="abandon_receipt_message">Are you sure you want to abandon this receipt and return to the main menu?</string>
@@ -42,9 +42,9 @@
     <string name="auth_session_expired">Session expired. Please sign in again.</string>
     <string name="crop_screen_title">Crop</string>
     <string name="receipt_screen_title">Receipt</string>
-    <string name="archive_screen_title">Archives</string>
+    <string name="archive_screen_title">Archive</string>
     <string name="history_screen_title">History</string>
-    <string name="archive_empty">No archives created.</string>
+    <string name="archive_empty">Your archive is empty.</string>
     <string name="archive_summary">Archive Summary</string>
     <string name="folder_summary">Folder Summary</string>
     <string name="archive_summary_empty">No payments pending.</string>
@@ -76,9 +76,8 @@
     <string name="standalone">Standalone</string>
     <string name="archive_name_label">Archive Name</string>
     <string name="receipt_name_label">Receipt Name</string>
-    <string name="history_empty">No receipts have been sent yet.</string>
+    <string name="history_empty">No receipts have been sent in the last 30 days.</string>
     <string name="history_no_internet">No internet connection.</string>
-    <string name="history_receipt_uuid">UUID = %1$s</string>
     <string name="history_unknown_date">Unknown date</string>
     <string name="history_no_participants">No participant details available.</string>
     <string name="remove_from_history">Remove from history</string>
@@ -125,7 +124,7 @@
     <string name="invalid_receipt_price">Enter a valid price.</string>
     <string name="ok">OK</string>
     <string name="button_contents">Contacts</string>
-    <string name="button_archive">Archives</string>
+    <string name="button_archive">Archive</string>
     <string name="button_history">History</string>
     <string name="members">Members</string>
     <string name="contacts_screen_title">Contancts</string>
@@ -197,14 +196,14 @@
     <string name="permission_contacts_title">Contacts</string>
     <string name="permission_camera_title">Camera</string>
     <string name="permission_sms_title">SMS</string>
-    <string name="settings_permissions_contacts_description">Allow Receipt Scanner to access your contacts. Current access: %1$s</string>
-    <string name="settings_permissions_camera_description">Allow Receipt Scanner to take pictures and record videos. Current access: %1$s</string>
-    <string name="settings_permissions_sms_description">Allow Receipt Scanner to send and view SMS messages. Current access: %1$s</string>
+    <string name="settings_permissions_contacts_description">Allow Kvitt to access your contacts. Current access: %1$s</string>
+    <string name="settings_permissions_camera_description">Allow Kvitt to take pictures and record videos. Current access: %1$s</string>
+    <string name="settings_permissions_sms_description">Allow Kvitt to send and view SMS messages. Current access: %1$s</string>
     <string name="permission_access_allowed">Allowed</string>
     <string name="permission_access_not_allowed">Not allowed</string>
     <string name="permission_access_not_available">Not available on this device</string>
     <string name="permission_onboarding_title">Permission</string>
-    <string name="permission_onboarding_message">Grant Receipt Scanner access to your contacts and camera. These permissions are required for certain features of the app. You can change them at any time in Settings &gt; Permissions.</string>
+    <string name="permission_onboarding_message">Grant Kvitt access to your contacts and camera. These permissions are required for certain features of the app. You can change them at any time in Settings &gt; Permissions.</string>
     <string name="settings_split_items_title">Split Items</string>
     <string name="settings_split_items_description">Whether to list similar items individually or group them together.</string>
     <string name="settings_pre_added_participants_title">Pre Added Participants</string>
@@ -263,8 +262,6 @@
     <string name="split">Split</string>
     <string name="combine">Combine</string>
     <string name="assign_payer">Assign Payer</string>
-    <string name="mark_as_payed">Mark as payed</string>
-    <string name="mark_as_unpayed">Mark as unpayed</string>
     <string name="payer">Payer</string>
     <string name="delete">Delete</string>
     <string name="clear">Clear</string>

@@ -11,6 +11,9 @@ This project now includes a first-pass Supabase schema for:
 - item-to-participant assignments
 - payment requests for the website
 
+The schema also enables a daily `pg_cron` cleanup job that deletes
+`public.history_entries` rows once they are older than 30 days.
+
 ## Project URL
 
 The Supabase project URL you shared:
@@ -46,12 +49,13 @@ If you later host the website somewhere else, add that URL too.
 
 ## Website config
 
-The website now supports two payment-link styles:
+The website now supports three payment-link styles:
 
 - direct query params like `?Phone=...&Amount=...`
+- compact history links like `?R=6fc89960&PC=1234`
 - Supabase-backed request tokens like `?request=<public_token>`
 
-To enable Supabase-backed request tokens on the website, edit
+To enable Supabase-backed payment links on the website, edit
 [docs/supabase-config.js](C:/Users/Administrator/Documents/TestRepo/docs/supabase-config.js)
 and add your publishable key.
 
