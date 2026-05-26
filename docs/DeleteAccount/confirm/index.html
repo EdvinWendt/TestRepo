@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Delete Account Confirmation | Kvitt</title>
+  <link rel="stylesheet" href="../../styles.css">
+</head>
+<body>
+  <div class="site-shell">
+    <header class="site-header">
+      <img class="site-logo" src="../../assets/kvitt-logo.png" alt="Kvitt">
+    </header>
+    <main class="page delete-account-page">
+      <section class="delete-card delete-card-compact" aria-labelledby="delete-confirm-title">
+        <h1 class="delete-title" id="delete-confirm-title">Delete account confirmation</h1>
+        <div class="delete-confirm-loading" id="delete-confirm-loading" aria-hidden="true"></div>
+        <p class="delete-status delete-status-large" id="delete-confirm-status" aria-live="polite">
+          Verifying your confirmation link...
+        </p>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../supabase-config.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

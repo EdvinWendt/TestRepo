@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Delete Account | Kvitt</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="site-shell">
+    <header class="site-header">
+      <img class="site-logo" src="../assets/kvitt-logo.png" alt="Kvitt">
+    </header>
+    <main class="page delete-account-page">
+      <section class="delete-card" aria-labelledby="delete-account-title">
+        <h1 class="delete-title" id="delete-account-title">Delete your Kvitt account</h1>
+        <p class="delete-copy">
+          When your account deletion is confirmed, Kvitt deletes your account and the synced
+          backend data linked to it, including your profile, archives, receipts, and history
+          entries stored in Supabase. Local data on devices you previously used is not removed
+          automatically from those devices.
+        </p>
+        <form class="delete-form" id="delete-account-form" novalidate>
+          <label class="delete-label" for="delete-account-email">Email</label>
+          <input
+            class="site-text-input"
+            id="delete-account-email"
+            name="email"
+            type="email"
+            inputmode="email"
+            autocomplete="email"
+            placeholder="Email"
+            required>
+          <button class="site-button" id="delete-account-next" type="submit">Next</button>
+        </form>
+        <p class="delete-status" id="delete-account-status" aria-live="polite"></p>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../supabase-config.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
